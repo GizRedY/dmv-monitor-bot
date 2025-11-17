@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#4F46E5">
+    <meta name="description" content="Get instant notifications when NC DMV appointments become available">
+    
+    <title>NC DMV Appointment Notifications</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --primary: #4F46E5;
+            --primary-dark: #4338CA;
+            --success: #10B981;
+            --error: #EF4444;
+            --text: #1F2937;
+            --text-light: #6B7280;
+            --bg: #F9FAFB;
+            --white: #FFFFFF;
+            --border: #E5E7EB;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 40px 0 30px;
+        }
+        
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            color: var(--text-light);
+        }
+        
+        .header .icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+        
+        /* Card */
+        .card {
+            background: var(--white);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        
+        /* Buttons */
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px 24px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-align: center;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        }
+        
+        .btn-secondary {
+            background: var(--white);
+            color: var(--text);
+            border: 2px solid var(--border);
+        }
+        
+        .btn-secondary:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        
+        .btn-danger {
+            background: var(--white);
+            color: var(--error);
+            border: 2px solid var(--error);
+        }
+
+        .btn-danger:hover {
+            background: var(--error);
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .btn + .btn {
+            margin-top: 12px;
+        }
+
+        /* Platform selection */
+        .platform-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .platform-btn {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            background: var(--white);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .platform-btn:hover {
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.1);
+        }
+
+        .platform-btn .icon {
+            font-size: 2rem;
+            margin-right: 15px;
+        }
+
+        .platform-btn .info h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .platform-btn .info p {
+            font-size: 0.9rem;
+            color: var(--text-light);
+        }
+
+        /* Setup instructions */
+        .setup-instructions {
+            background: #EEF2FF;
+            border-left: 4px solid var(--primary);
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .setup-instructions h3 {
+            color: var(--primary);
+            margin-bottom: 12px;
+            font-size: 1.1rem;
+        }
+
+        .setup-instructions ol {
+            margin-left: 20px;
+        }
+
+        .setup-instructions li {
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        .setup-instructions .note {
+            margin-top: 12px;
+            padding: 12px;
+            background: white;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: var(--text-light);
+        }
+
+        /* Category selection */
+        .category-list {
+            display: grid;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .category-item {
+            padding: 16px;
+            background: var(--white);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .category-item:hover {
+            border-color: var(--primary);
+        }
+
+        .category-item.selected {
+            border-color: var(--primary);
+            background: #EEF2FF;
+        }
+
+        .category-item h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: var(--text);
+        }
+
+        .category-item p {
+            font-size: 0.9rem;
+            color: var(--text-light);
+        }
+
+        /* Location selection */
+        .location-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .location-item {
+            padding: 12px;
+            background: var(--white);
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            cursor: pointer;
+            text-align: center;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .location-item:hover {
+            border-color: var(--primary);
+        }
+
+        .location-item.selected {
+            border-color: var(--primary);
+            background: var(--primary);
+            color: white;
+        }
+
+        /* Alert */
+        .alert {
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert.success {
+            background: #D1FAE5;
+            color: #065F46;
+            border: 1px solid #10B981;
+        }
+
+        .alert.error {
+            background: #FEE2E2;
+            color: #991B1B;
+            border: 1px solid #EF4444;
+        }
+
+        .alert.info {
+            background: #DBEAFE;
+            color: #1E40AF;
+            border: 1px solid #3B82F6;
+        }
+
+        /* Inline error (below button) */
+        .inline-error {
+            display: none;
+            padding: 12px;
+            margin-top: 12px;
+            background: #FEE2E2;
+            color: #991B1B;
+            border: 1px solid #EF4444;
+            border-radius: 8px;
+            font-size: 0.95rem;
+        }
+
+        .inline-error.show {
+            display: block;
+        }
+
+        /* Loading spinner */
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--primary);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Screen management */
+        .screen {
+            display: none;
+        }
+
+        .screen.active {
+            display: block;
+        }
+
+        /* Back button */
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            color: var(--primary);
+            font-weight: 600;
+            margin-bottom: 20px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .back-btn:hover {
+            text-decoration: underline;
+        }
+
+        /* Progress indicator */
+        .progress {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 30px;
+        }
+
+        .progress-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--border);
+        }
+
+        .progress-dot.active {
+            background: var(--primary);
+        }
+
+        /* Status badge */
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            background: var(--success);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        /* Donate box */
+        .donate-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            padding: 24px;
+            margin-top: 20px;
+            text-align: center;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .donate-box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .donate-box .donate-icon {
+            font-size: 2.5rem;
+            margin-bottom: 12px;
+        }
+
+        .donate-box h3 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .donate-box p {
+            font-size: 0.95rem;
+            opacity: 0.95;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 30px 0;
+            color: var(--text-light);
+            font-size: 0.9rem;
+            margin-top: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Alert -->
+        <div class="alert" id="alert"></div>
+
+        <!-- Screen 1: Welcome -->
+        <div class="screen active" id="screen-welcome">
+            <div class="header">
+                <div class="icon">🚗</div>
+                <h1>NC DMV Appointments</h1>
+                <p>Get instant notifications when appointments become available</p>
+            </div>
+
+            <div class="card">
+                <button class="btn btn-primary" onclick="showScreen('platform')">
+                    🔔 Get Free Notifications
+                </button>
+
+                <div style="margin-top: 30px; text-align: center; color: var(--text-light);">
+                    <p><strong>✔</strong> Free forever</p>
+                    <p><strong>✔</strong> Instant browser notifications</p>
+                    <p><strong>✔</strong> No app installation needed</p>
+                </div>
+            </div>
+
+            <!-- Donate Box -->
+            <div class="donate-box" onclick="window.open('https://google.com', '_blank')">
+                <div class="donate-icon">💝</div>
+                <h3>Support This Project</h3>
+                <p>Help us keep this service free for everyone</p>
+            </div>
+        </div>
+
+        <!-- Screen 2: Platform Selection -->
+        <div class="screen" id="screen-platform">
+            <div class="progress">
+                <div class="progress-dot active"></div>
+                <div class="progress-dot"></div>
+                <div class="progress-dot"></div>
+            </div>
+
+            <div class="header">
+                <h1>Choose Your Device</h1>
+                <p>Select your device type to continue</p>
+            </div>
+
+            <div class="card">
+                <div class="platform-grid">
+                    <div class="platform-btn" onclick="selectPlatform('iphone')">
+                        <div class="icon">📱</div>
+                        <div class="info">
+                            <h3>iPhone / iPad</h3>
+                            <p>Safari browser</p>
+                        </div>
+                    </div>
+
+                    <div class="platform-btn" onclick="selectPlatform('android')">
+                        <div class="icon">🤖</div>
+                        <div class="info">
+                            <h3>Android</h3>
+                            <p>Chrome browser</p>
+                        </div>
+                    </div>
+
+                    <div class="platform-btn" onclick="selectPlatform('desktop')">
+                        <div class="icon">💻</div>
+                        <div class="info">
+                            <h3>Desktop / Laptop</h3>
+                            <p>Any modern browser</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Screen 3: Setup Instructions -->
+        <div class="screen" id="screen-setup">
+            <span class="back-btn" onclick="showScreen('platform')">← Back</span>
+
+            <div class="progress">
+                <div class="progress-dot active"></div>
+                <div class="progress-dot active"></div>
+                <div class="progress-dot"></div>
+            </div>
+
+            <div class="header">
+                <h1>Setup Instructions</h1>
+            </div>
+
+            <div class="card">
+                <!-- iPhone instructions -->
+                <div class="setup-instructions" id="setup-iphone" style="display: none;">
+                    <h3>📱 iPhone Setup</h3>
+                    <ol>
+                        <li><strong>Tap the Share Button</strong><br>Look for the share icon at the bottom of Safari</li>
+                        <li><strong>Add to Home Screen</strong><br>Scroll down and select "Add to Home Screen"</li>
+                        <li><strong>Enable Notifications</strong><br>Settings → Notifications → Allow</li>
+                    </ol>
+                    <div class="note">
+                        <strong>Can't find the app in Settings?</strong><br>
+                        Open the app and sign up for notifications again. At the end of the signup flow, your phone will ask for permission. Click "Allow" and it should work.
+                    </div>
+                </div>
+
+                <!-- Android instructions -->
+                <div class="setup-instructions" id="setup-android" style="display: none;">
+                    <h3>🤖 Android Setup</h3>
+                    <ol>
+                        <li><strong>Install to Home Screen</strong><br>Chrome Menu (⋮) → Add to Home Screen</li>
+                        <li><strong>Enable Notifications</strong><br>Settings → Apps → Notifications → Allow</li>
+                    </ol>
+                    <div class="note">
+                        After adding to home screen, open the app from there and continue with the setup.
+                    </div>
+                </div>
+
+                <!-- Desktop instructions -->
+                <div class="setup-instructions" id="setup-desktop" style="display: none;">
+                    <h3>💻 Desktop Setup</h3>
+                    <ol>
+                        <li><strong>Allow Notifications</strong><br>Click "Allow" when your browser asks for notification permission</li>
+                        <li><strong>Optional: Install as App</strong><br>Look for the install icon (⊕) in your browser's address bar</li>
+                    </ol>
+                    <div class="note">
+                        You can start receiving notifications right away in your browser!
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" onclick="showScreen('category')" style="margin-top: 20px;">
+                    ✓ I've Completed Setup
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 4: Category Selection -->
+        <div class="screen" id="screen-category">
+            <span class="back-btn" onclick="showScreen('setup')">← Back</span>
+
+            <div class="progress">
+                <div class="progress-dot active"></div>
+                <div class="progress-dot active"></div>
+                <div class="progress-dot active"></div>
+            </div>
+
+            <div class="header">
+                <h1>Select Category</h1>
+                <p>Choose what you need</p>
+            </div>
+
+            <div class="card">
+                <div class="category-list" id="categoryList">
+                    <div class="spinner"></div>
+                </div>
+
+                <button class="btn btn-primary" onclick="showScreen('locations')" id="categoryNextBtn" disabled style="margin-top: 20px;">
+                    Continue →
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 5: Location Selection -->
+        <div class="screen" id="screen-locations">
+            <span class="back-btn" onclick="showScreen('category')">← Back</span>
+
+            <div class="header">
+                <h1>Select Locations</h1>
+                <p>Choose one or more locations (or skip for all)</p>
+            </div>
+
+            <div class="card">
+                <div class="location-grid" id="locationGrid">
+                    <!-- Will be populated with locations -->
+                </div>
+
+                <button class="btn btn-secondary" onclick="skipLocations()" style="margin-top: 20px;">
+                    Skip - Monitor All Locations
+                </button>
+
+                <button class="btn btn-primary" onclick="subscribe()" id="subscribeBtn" disabled style="margin-top: 12px;">
+                    🔔 Start Monitoring
+                </button>
+
+                <!-- Inline error message -->
+                <div class="inline-error" id="subscribeError"></div>
+            </div>
+        </div>
+
+        <!-- Screen 6: Success -->
+        <div class="screen" id="screen-success">
+            <div class="header">
+                <div class="icon">✅</div>
+                <h1>All Set!</h1>
+                <p>You'll receive notifications when appointments are available</p>
+            </div>
+
+            <div class="card">
+                <div style="text-align: center;">
+                    <div class="status-badge">🔔 Monitoring Active</div>
+
+                    <div style="margin-top: 30px; padding: 20px; background: var(--bg); border-radius: 12px;">
+                        <p style="font-weight: 600; margin-bottom: 10px;">Your Subscription:</p>
+                        <p id="successCategory" style="color: var(--text-light);"></p>
+                        <p id="successLocations" style="color: var(--text-light);"></p>
+                    </div>
+
+                    <button class="btn btn-secondary" onclick="testNotification()" style="margin-top: 20px;">
+                        🧪 Send Test Notification
+                    </button>
+
+                    <button class="btn btn-danger" onclick="unsubscribe()" style="margin-top: 12px;">
+                        🔕 Unsubscribe
+                    </button>
+
+                    <button class="btn btn-primary" onclick="location.reload()" style="margin-top: 12px;">
+                        ← Back to Home
+                    </button>
+                </div>
+            </div>
+
+            <!-- Donate Box on success screen too -->
+            <div class="donate-box" onclick="window.open('https://google.com', '_blank')">
+                <div class="donate-icon">💝</div>
+                <h3>Enjoying This Service?</h3>
+                <p>Consider supporting us to keep it running!</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Free NC DMV Appointment Notifications</p>
+            <p style="margin-top: 5px; font-size: 0.85rem;">Powered by browser notifications</p>
+        </div>
+    </div>
+    
+    <script src="/app.js"></script>
+</body>
+</html>

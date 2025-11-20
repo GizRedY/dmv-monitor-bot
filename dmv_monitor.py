@@ -27,6 +27,31 @@ except ImportError:
     print("ERROR: pywebpush not installed. Run: pip install pywebpush")
     sys.exit(1)
 
+# Добавьте ПЕРЕД классом Config:
+
+# Полный список локаций NC (из фронтенда)
+ALL_NC_LOCATIONS = [
+    'Aberdeen', 'Ahoskie', 'Albemarle', 'Andrews', 'Asheboro',
+    'Asheville', 'Boone', 'Brevard', 'Bryson City', 'Burgaw',
+    'Burnsville', 'Carrboro', 'Cary', 'Charlotte East', 'Charlotte North',
+    'Charlotte South', 'Charlotte West', 'Clayton', 'Clinton', 'Clyde',
+    'Concord', 'Durham East', 'Durham South', 'Elizabeth City', 'Elizabethtown',
+    'Elkin', 'Erwin', 'Fayetteville South', 'Fayetteville West', 'Forest City',
+    'Franklin', 'Fuquay-Varina', 'Garner', 'Gastonia', 'Goldsboro',
+    'Graham', 'Greensboro East', 'Greensboro West', 'Greenville', 'Hamlet',
+    'Havelock', 'Henderson', 'Hendersonville', 'Hickory', 'High Point',
+    'Hillsborough', 'Hudson', 'Huntersville', 'Jacksonville', 'Jefferson',
+    'Kernersville', 'Kinston', 'Lexington', 'Lincolnton', 'Louisburg',
+    'Lumberton', 'Marion', 'Marshall', 'Mocksville', 'Monroe',
+    'Mooresville', 'Morehead City', 'Morganton', 'Mount Airy', 'Mount Holly',
+    'Nags Head', 'New Bern', 'Newton', 'Oxford', 'Polkton',
+    'Raleigh North', 'Raleigh West', 'Roanoke Rapids', 'Rocky Mount', 'Roxboro',
+    'Salisbury', 'Sanford', 'Shallotte', 'Shelby', 'Siler City',
+    'Smithfield', 'Statesville', 'Stedman', 'Sylva', 'Tarboro',
+    'Taylorsville', 'Thomasville', 'Troy', 'Washington', 'Wendell',
+    'Wentworth', 'Whiteville', 'Wilkesboro', 'Williamston', 'Wilmington North',
+    'Wilmington South', 'Wilson', 'Winston Salem North', 'Winston Salem South', 'Yadkinville'
+]
 
 # ============================================================================
 # CONFIGURATION
@@ -299,35 +324,49 @@ class SubscriptionManager:
         self.load_subscriptions()
 
     def load_subscriptions(self):
-        """Load subscriptions from file"""
+        """Load subscriptions from file, fully replacing in-memory data"""
         try:
-            if self.config.subscriptions_file.exists():
-                with open(self.config.subscriptions_file, 'r') as f:
-                    data = json.load(f)
-                    for user_data in data:
-                        # Parse created_at
-                        created_at = user_data.get('created_at')
-                        if isinstance(created_at, str):
-                            created_at = datetime.fromisoformat(created_at)
-                        elif created_at is None:
-                            created_at = datetime.now()
+            # Reset current in-memory subscriptions to avoid stale entries
+            self.subscriptions = {}
 
-                        # Parse last_notification_sent
-                        last_notification_sent = user_data.get('last_notification_sent')
-                        if isinstance(last_notification_sent, str):
-                            last_notification_sent = datetime.fromisoformat(last_notification_sent)
+            if not self.config.subscriptions_file.exists():
+                self.logger.info("No subscriptions file found")
+                return
 
-                        sub = UserSubscription(
-                            user_id=user_data['user_id'],
-                            push_subscription=user_data.get('push_subscription'),
-                            categories=set(user_data.get('categories', [])),
-                            locations=set(user_data.get('locations', [])),
-                            date_range_days=user_data.get('date_range_days', 30),
-                            created_at=created_at,
-                            last_notification_sent=last_notification_sent
-                        )
-                        self.subscriptions[sub.user_id] = sub
-                self.logger.info(f"Loaded {len(self.subscriptions)} subscriptions")
+            with open(self.config.subscriptions_file, 'r') as f:
+                data = json.load(f)
+
+            loaded_count = 0
+
+            for user_data in data:
+                try:
+                    # Parse created_at
+                    created_at = user_data.get('created_at')
+                    if isinstance(created_at, str):
+                        created_at = datetime.fromisoformat(created_at)
+                    elif created_at is None:
+                        created_at = datetime.now()
+
+                    # Parse last_notification_sent
+                    last_notification_sent = user_data.get('last_notification_sent')
+                    if isinstance(last_notification_sent, str):
+                        last_notification_sent = datetime.fromisoformat(last_notification_sent)
+
+                    sub = UserSubscription(
+                        user_id=user_data['user_id'],
+                        push_subscription=user_data.get('push_subscription'),
+                        categories=set(user_data.get('categories', [])),
+                        locations=set(user_data.get('locations', [])),
+                        date_range_days=user_data.get('date_range_days', 30),
+                        created_at=created_at,
+                        last_notification_sent=last_notification_sent
+                    )
+                    self.subscriptions[sub.user_id] = sub
+                    loaded_count += 1
+                except Exception as e:
+                    self.logger.error(f"Skipping invalid subscription entry: {e}")
+
+            self.logger.info(f"Loaded {loaded_count} subscriptions")
         except Exception as e:
             self.logger.error(f"Error loading subscriptions: {e}")
 
@@ -383,7 +422,7 @@ class SubscriptionManager:
 
 
 # ============================================================================
-# DMV SCRAPER (same as before)
+# DMV SCRAPER
 # ============================================================================
 
 class DMVScraper:
@@ -692,12 +731,42 @@ class DMVMonitorService:
         self.subscription_manager = SubscriptionManager(config)
         self.notification_service = NotificationService(config)
         self.last_seen_slots: Dict[str, Set[str]] = {}
+        self.current_availability: Dict[str, dict] = {}
 
     async def initialize(self):
         """Initialize the service"""
         self.logger.info("Initializing DMV Monitor Service")
         await self.scraper.initialize()
         self.logger.info("Service initialized successfully")
+
+    def _save_current_availability(self):
+        """Persist current availability to JSON so API can read it"""
+        try:
+            self.config.data_dir.mkdir(parents=True, exist_ok=True)
+
+            availability_list = list(self.current_availability.values())
+
+            self.logger.info(f"Saving {len(availability_list)} availability entries to {self.config.last_check_file}")
+
+            with open(self.config.last_check_file, "w") as f:
+                json.dump(availability_list, f, indent=2)
+
+            self.logger.debug(f"Successfully saved availability data")
+        except Exception as e:
+            self.logger.error(f"Error saving current availability: {e}", exc_info=True)
+
+    def _update_availability_entry(self, availability: LocationAvailability):
+        """Update availability record for given category/location"""
+        key = f"{availability.category}:{availability.location_name}"
+
+        self.logger.debug(f"Updating availability entry: {key} with {len(availability.slots)} slots")
+
+        self.current_availability[key] = {
+            "category": availability.category,
+            "location_name": availability.location_name,
+            "slots_count": len(availability.slots),
+            "last_checked": availability.last_checked.isoformat()
+        }
 
     async def monitor_category(self, category_key: str):
         """Monitor a single category"""
@@ -708,25 +777,54 @@ class DMVMonitorService:
                 self.logger.error(f"Failed to navigate to category: {category_key}")
                 return
 
-            locations = await self.scraper.get_available_locations()
+            # Получаем доступные локации с сайта
+            available_locations = await self.scraper.get_available_locations()
 
-            if not locations:
+            if not available_locations:
                 self.logger.info(f"No available locations for category: {category_key}")
+
+                # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Записываем ВСЕ локации NC с 0 слотами
+                for location in ALL_NC_LOCATIONS:
+                    availability = LocationAvailability(
+                        location_name=location,
+                        category=category_key,
+                        slots=[]  # 0 слотов
+                    )
+                    self._update_availability_entry(availability)
+
+                self.logger.info(f"Recorded all {len(ALL_NC_LOCATIONS)} NC locations with 0 slots for {category_key}")
+                self._save_current_availability()
                 return
 
-            self.logger.info(f"Found {len(locations)} available locations")
+            self.logger.info(f"Found {len(available_locations)} available locations for {category_key}")
 
-            for location in locations:
+            # Сначала записываем ВСЕ локации с 0 слотами
+            for location in ALL_NC_LOCATIONS:
+                availability = LocationAvailability(
+                    location_name=location,
+                    category=category_key,
+                    slots=[]
+                )
+                self._update_availability_entry(availability)
+
+            # Теперь проверяем доступные локации и обновляем их реальными слотами
+            for location in available_locations:
                 try:
+                    self.logger.info(f"Checking slots for {location} in {category_key}")
                     slots = await self.scraper.get_appointment_slots(location)
 
-                    if slots:
-                        availability = LocationAvailability(
-                            location_name=location,
-                            category=category_key,
-                            slots=slots
-                        )
+                    availability = LocationAvailability(
+                        location_name=location,
+                        category=category_key,
+                        slots=slots
+                    )
 
+                    # Обновляем запись для этой локации
+                    self._update_availability_entry(availability)
+                    self.logger.info(f"Updated availability for {location}: {len(slots)} slots")
+
+                    # Только если есть слоты - проверяем новые и отправляем уведомления
+                    if slots:
                         key = f"{category_key}:{location}"
                         current_slots_set = {str(slot) for slot in slots}
 
@@ -736,32 +834,42 @@ class DMVMonitorService:
                         new_slots = current_slots_set - self.last_seen_slots[key]
 
                         if new_slots:
-                            self.logger.info(f"New slots found for {location}: {len(new_slots)} new")
+                            self.logger.info(f"NEW SLOTS FOUND for {location}: {len(new_slots)} new slots!")
 
                             interested_users = self.subscription_manager.get_interested_users(
                                 category_key, location
                             )
 
+                            self.logger.info(f"Found {len(interested_users)} interested users")
+
                             for user in interested_users:
                                 success, error_type = self.notification_service.notify_user(user, availability)
 
                                 if success:
+                                    self.logger.info(f"Successfully notified user {user.user_id}")
                                     self.subscription_manager.update_last_notification(user.user_id)
                                 elif error_type == 'invalid_subscription':
-                                    # Remove invalid subscription
                                     self.logger.info(f"Removing invalid subscription for user {user.user_id}")
                                     self.subscription_manager.remove_subscription(user.user_id)
+                                else:
+                                    self.logger.warning(f"Failed to notify user {user.user_id}")
 
                             self.last_seen_slots[key] = current_slots_set
                         else:
-                            self.logger.info(f"No new slots for {location}")
+                            self.logger.info(f"No new slots for {location} (already seen all {len(slots)} slots)")
+                    else:
+                        self.logger.info(f"No available slots for {location}")
 
                 except Exception as e:
-                    self.logger.error(f"Error checking location {location}: {e}")
+                    self.logger.error(f"Error checking location {location}: {e}", exc_info=True)
                     continue
 
+            # После проверки всех локаций - сохраняем результат
+            self.logger.info(f"Finished checking category {category_key}, saving results...")
+            self._save_current_availability()
+
         except Exception as e:
-            self.logger.error(f"Error monitoring category {category_key}: {e}")
+            self.logger.error(f"Error monitoring category {category_key}: {e}", exc_info=True)
 
     async def run(self):
         """Main monitoring loop"""

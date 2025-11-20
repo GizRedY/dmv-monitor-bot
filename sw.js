@@ -1,5 +1,5 @@
 // Service Worker for PWA and Push Notifications
-const CACHE_NAME = 'dmv-monitor-v1';
+const CACHE_NAME = 'dmv-monitor-v6';
 const urlsToCache = [
   '/app.js',
   '/manifest.json'
@@ -56,7 +56,7 @@ self.addEventListener('fetch', (event) => {
 // Push event - show notification
 self.addEventListener('push', (event) => {
   console.log('Push notification received', event);
-  
+
   let notificationData = {
     title: '🚗 DMV Appointment Available!',
     body: 'New appointments have been found. Click to view details.',
@@ -68,7 +68,7 @@ self.addEventListener('push', (event) => {
       url: '/'
     }
   };
-  
+
   if (event.data) {
     try {
       const data = event.data.json();
@@ -80,7 +80,7 @@ self.addEventListener('push', (event) => {
       console.error('Error parsing push data:', e);
     }
   }
-  
+
   event.waitUntil(
     self.registration.showNotification(notificationData.title, {
       body: notificationData.body,
@@ -107,12 +107,12 @@ self.addEventListener('push', (event) => {
 // Notification click event
 self.addEventListener('notificationclick', (event) => {
   console.log('Notification clicked', event);
-  
+
   event.notification.close();
-  
+
   if (event.action === 'view' || !event.action) {
     const urlToOpen = event.notification.data?.url || '/';
-    
+
     event.waitUntil(
       clients.matchAll({ type: 'window', includeUncontrolled: true })
         .then((clientList) => {

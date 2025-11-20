@@ -28,9 +28,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount("/data", StaticFiles(directory="data"), name="data")
+
 # Data directory
 DATA_DIR = Path("./data")
 SUBSCRIPTIONS_FILE = DATA_DIR / "subscriptions.json"
+AVAILABILITY_FILE = DATA_DIR / "last_check.json"
+
 
 VAPID_PRIVATE_KEY = "pK7ehUTOBpbL0ilLgPntwnvMPBvjQYXEjrQWz1xRAtg"
 VAPID_PUBLIC_KEY = "BJf7Zamd5ty_QAuk2o5PwDpMPvutYdk-EG-FgtNaodREIOFRj1MTRXRznug45wAHonmkeXgfsFsLyXNq8k8uY-A"
@@ -147,6 +151,14 @@ class VapidKeyResponse(BaseModel):
     """VAPID public key response"""
     public_key: str
 
+class AvailabilityItem(BaseModel):
+    """Single availability record for UI"""
+    category: str
+    location_name: str
+    slots_count: int
+    last_checked: str
+
+
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -174,6 +186,25 @@ def save_subscriptions(subscriptions: dict):
         logger.error(f"Error saving subscriptions: {e}")
         raise HTTPException(status_code=500, detail="Failed to save subscription")
 
+
+
+def load_availability() -> list:
+    """Load current availability snapshot from file"""
+    try:
+        if not AVAILABILITY_FILE.exists():
+            return []
+
+        with open(AVAILABILITY_FILE, "r") as f:
+            data = json.load(f)
+
+        if isinstance(data, list):
+            return data
+
+        # For backward compatibility if format changes
+        return list(data.values())
+    except Exception as e:
+        logger.error(f"Error loading availability: {e}")
+        return []
 
 def send_push_notification(subscription_info: dict, title: str, body: str, url: str = "/") -> bool:
     """Send push notification to a subscriber"""
@@ -315,6 +346,24 @@ async def get_categories():
         for key, info in DMV_CATEGORIES.items()
     ]
 
+
+
+@app.get("/availability", response_model=List[AvailabilityItem])
+async def get_availability():
+    """Get current appointment availability snapshot for UI"""
+    raw = load_availability()
+    items: List[AvailabilityItem] = []
+
+    for item in raw:
+        try:
+            items.append(AvailabilityItem(**item))
+        except Exception:
+            # Skip invalid records
+            continue
+
+    # Sort by location name for stable display
+    items.sort(key=lambda x: (x.location_name.lower(), x.category))
+    return items
 
 @app.post("/subscriptions", response_model=SubscriptionResponse)
 async def create_subscription(subscription: SubscriptionRequest):

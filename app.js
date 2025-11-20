@@ -1,21 +1,15 @@
-// App state
+// ============================================================================
+// APP STATE
+// ============================================================================
+
 const state = {
     platform: null,
-    selectedCategory: null,
+    selectedCategories: [],
     selectedLocations: [],
     userId: null,
     subscription: null
 };
 
-// Common NC DMV locations
-const NC_LOCATIONS = [
-    "Raleigh", "Durham", "Chapel Hill", "Cary", "Charlotte", "Wilmington",
-    "Asheville", "Greensboro", "Winston-Salem", "Fayetteville", "Apex",
-    "Garner", "Morrisville", "Wake Forest", "Knightdale", "Clayton",
-    "Holly Springs", "Fuquay-Varina", "Roxboro", "Oxford", "Henderson"
-];
-
-// API base URL
 const API_URL = window.location.origin;
 
 // ============================================================================
@@ -24,10 +18,12 @@ const API_URL = window.location.origin;
 
 function showScreen(screenName) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    document.getElementById(`screen-${screenName}`).classList.add('active');
+    const screenEl = document.getElementById(`screen-${screenName}`);
+    if (screenEl) {
+        screenEl.classList.add('active');
+    }
     window.scrollTo(0, 0);
-    
-    // Load data when entering specific screens
+
     if (screenName === 'category') {
         loadCategories();
     } else if (screenName === 'locations') {
@@ -35,7 +31,6 @@ function showScreen(screenName) {
     }
 }
 
-// Make showScreen available globally
 window.showScreen = showScreen;
 
 // ============================================================================
@@ -44,17 +39,18 @@ window.showScreen = showScreen;
 
 function selectPlatform(platform) {
     state.platform = platform;
-    
-    // Show appropriate setup instructions
+
     document.querySelectorAll('.setup-instructions').forEach(el => {
         el.style.display = 'none';
     });
-    document.getElementById(`setup-${platform}`).style.display = 'block';
-    
+    const block = document.getElementById(`setup-${platform}`);
+    if (block) {
+        block.style.display = 'block';
+    }
+
     showScreen('setup');
 }
 
-// Make selectPlatform available globally
 window.selectPlatform = selectPlatform;
 
 // ============================================================================
@@ -63,215 +59,248 @@ window.selectPlatform = selectPlatform;
 
 async function requestNotificationPermission() {
     if (!('Notification' in window)) {
-        return { granted: false, error: 'Your browser does not support notifications' };
+        return { granted: false, error: 'Browser does not support notifications' };
     }
-    
+
     if (Notification.permission === 'granted') {
         return { granted: true };
     }
-    
+
     if (Notification.permission !== 'denied') {
         const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-            return { granted: true };
-        } else {
-            return { granted: false, error: 'Please allow notifications to receive appointment alerts' };
-        }
+        return { granted: permission === 'granted' };
     }
-    
-    return { granted: false, error: 'Notifications are blocked. Please enable them in your browser settings' };
+
+    return { granted: false, error: 'Notifications are blocked in settings.' };
 }
 
 // ============================================================================
-// CATEGORY SELECTION
+// LOAD CATEGORIES
 // ============================================================================
 
 async function loadCategories() {
     try {
         const response = await fetch(`${API_URL}/categories`);
         const categories = await response.json();
-        
+
         const container = document.getElementById('categoryList');
+        if (!container) return;
+
         container.innerHTML = '';
-        
+
         categories.forEach(cat => {
             const div = document.createElement('div');
             div.className = 'category-item';
-            div.onclick = () => selectCategory(cat.key, div);
+            if (state.selectedCategories.includes(cat.key)) {
+                div.classList.add('selected');
+            }
+
+            div.onclick = () => toggleCategory(cat.key, div);
             div.innerHTML = `
                 <h4>${cat.name}</h4>
                 <p>${cat.description}</p>
             `;
             container.appendChild(div);
         });
+
+        const nextBtn = document.getElementById('categoryNextBtn');
+        if (nextBtn) nextBtn.disabled = state.selectedCategories.length === 0;
+
     } catch (error) {
-        console.error('Error loading categories:', error);
+        console.error('Category load error:', error);
         showAlert('Failed to load categories', 'error');
     }
 }
 
-function selectCategory(categoryKey, element) {
-    // Deselect all
-    document.querySelectorAll('.category-item').forEach(el => {
-        el.classList.remove('selected');
-    });
-    
-    // Select this one
-    element.classList.add('selected');
-    state.selectedCategory = categoryKey;
-    
-    // Enable next button
-    document.getElementById('categoryNextBtn').disabled = false;
+function toggleCategory(key, element) {
+    element.classList.toggle('selected');
+
+    const idx = state.selectedCategories.indexOf(key);
+    if (idx >= 0) {
+        state.selectedCategories.splice(idx, 1);
+    } else {
+        state.selectedCategories.push(key);
+    }
+
+    const nextBtn = document.getElementById('categoryNextBtn');
+    if (nextBtn) nextBtn.disabled = state.selectedCategories.length === 0;
 }
 
 // ============================================================================
 // LOCATION SELECTION
 // ============================================================================
 
+const NC_LOCATIONS = [
+    'Aberdeen', 'Ahoskie', 'Albemarle', 'Andrews', 'Asheboro',
+    'Asheville', 'Boone', 'Brevard', 'Bryson City', 'Burgaw',
+    'Burnsville', 'Carrboro', 'Cary', 'Charlotte East', 'Charlotte North',
+    'Charlotte South', 'Charlotte West', 'Clayton', 'Clinton', 'Clyde',
+    'Concord', 'Durham East', 'Durham South', 'Elizabeth City', 'Elizabethtown',
+    'Elkin', 'Erwin', 'Fayetteville South', 'Fayetteville West', 'Forest City',
+    'Franklin', 'Fuquay-Varina', 'Garner', 'Gastonia', 'Goldsboro',
+    'Graham', 'Greensboro East', 'Greensboro West', 'Greenville', 'Hamlet',
+    'Havelock', 'Henderson', 'Hendersonville', 'Hickory', 'High Point',
+    'Hillsborough', 'Hudson', 'Huntersville', 'Jacksonville', 'Jefferson',
+    'Kernersville', 'Kinston', 'Lexington', 'Lincolnton', 'Louisburg',
+    'Lumberton', 'Marion', 'Marshall', 'Mocksville', 'Monroe', 'Mooresville',
+    'Morehead City', 'Morganton', 'Mount Airy', 'Mount Holly', 'Nags Head',
+    'New Bern', 'Newton', 'Oxford', 'Polkton', 'Raleigh North', 'Raleigh West',
+    'Roanoke Rapids', 'Rocky Mount', 'Roxboro', 'Salisbury', 'Sanford',
+    'Shallotte', 'Shelby', 'Siler City', 'Smithfield', 'Statesville',
+    'Stedman', 'Sylva', 'Tarboro', 'Taylorsville', 'Thomasville', 'Troy',
+    'Washington', 'Wendell', 'Wentworth', 'Whiteville', 'Wilkesboro',
+    'Williamston', 'Wilmington North', 'Wilmington South', 'Wilson',
+    'Winston Salem North', 'Winston Salem South', 'Yadkinville'
+];
+
 function loadLocations() {
     const grid = document.getElementById('locationGrid');
+    if (!grid) return;
+
     grid.innerHTML = '';
-    
-    NC_LOCATIONS.forEach(location => {
+
+    NC_LOCATIONS.forEach(loc => {
         const div = document.createElement('div');
         div.className = 'location-item';
-        div.textContent = location;
-        div.onclick = () => toggleLocation(location, div);
+        div.textContent = loc;
+
+        if (state.selectedLocations.includes(loc)) {
+            div.classList.add('selected');
+        }
+
+        div.onclick = () => toggleLocation(loc, div);
         grid.appendChild(div);
     });
+
+    const btn = document.getElementById('subscribeBtn');
+    if (btn) btn.disabled = state.selectedLocations.length === 0;
 }
 
-function toggleLocation(location, element) {
+function toggleLocation(loc, element) {
     element.classList.toggle('selected');
-    
-    const index = state.selectedLocations.indexOf(location);
-    if (index > -1) {
-        state.selectedLocations.splice(index, 1);
+
+    const idx = state.selectedLocations.indexOf(loc);
+    if (idx >= 0) {
+        state.selectedLocations.splice(idx, 1);
     } else {
-        state.selectedLocations.push(location);
+        state.selectedLocations.push(loc);
     }
-    
-    // Enable subscribe button if at least one location selected
-    document.getElementById('subscribeBtn').disabled = state.selectedLocations.length === 0;
+
+    const btn = document.getElementById('subscribeBtn');
+    if (btn) btn.disabled = state.selectedLocations.length === 0;
 }
 
-function skipLocations() {
-    state.selectedLocations = [];
-    subscribe();
-}
+window.filterLocations = function () {
+    const searchEl = document.getElementById('locationSearch');
+    const query = searchEl.value.toLowerCase();
 
-// Make skipLocations available globally
-window.skipLocations = skipLocations;
+    document.querySelectorAll('.location-item').forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(query) ? '' : 'none';
+    });
+};
 
 // ============================================================================
-// SUBSCRIPTION
+// SUBSCRIBE
 // ============================================================================
 
-function showInlineError(message) {
-    const errorDiv = document.getElementById('subscribeError');
-    errorDiv.textContent = message;
-    errorDiv.classList.add('show');
+function showInlineError(msg) {
+    const el = document.getElementById('subscribeError');
+    el.textContent = msg;
+    el.classList.add('show');
 }
 
 function hideInlineError() {
-    const errorDiv = document.getElementById('subscribeError');
-    errorDiv.classList.remove('show');
+    const el = document.getElementById('subscribeError');
+    el.classList.remove('show');
 }
 
 async function subscribe() {
     const btn = document.getElementById('subscribeBtn');
-    const originalText = btn.textContent;
+    const original = btn.textContent;
+
     btn.disabled = true;
     btn.textContent = '⏳ Setting up...';
     hideInlineError();
-    
+
     try {
-        // Request notification permission
-        const permissionResult = await requestNotificationPermission();
-        if (!permissionResult.granted) {
-            showInlineError(permissionResult.error || 'Notification permission is required. Please enable notifications in your browser settings.');
+        if (state.selectedCategories.length === 0) {
+            showInlineError('Please select at least one category.');
             btn.disabled = false;
-            btn.textContent = originalText;
+            btn.textContent = original;
             return;
         }
-        
-        // Register service worker for push notifications
-        let pushSubscription = null;
-        if ('serviceWorker' in navigator && 'PushManager' in window) {
-            try {
-                const registration = await navigator.serviceWorker.register('/sw.js');
-                await navigator.serviceWorker.ready;
-                
-                // Get VAPID public key
-                const vapidKey = await getVapidPublicKey();
-                
-                // Subscribe to push notifications
-                pushSubscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: urlBase64ToUint8Array(vapidKey)
-                });
-                
-                state.subscription = pushSubscription;
-            } catch (error) {
-                console.error('Error setting up push:', error);
-                // Continue anyway - user will still get browser notifications
-            }
+
+        const permission = await requestNotificationPermission();
+        if (!permission.granted) {
+            showInlineError(permission.error || 'Notifications are required.');
+            btn.disabled = false;
+            btn.textContent = original;
+            return;
         }
-        
-        // Generate user ID (use subscription endpoint as unique ID or fallback to timestamp)
-        state.userId = pushSubscription ? 
-            btoa(pushSubscription.endpoint).substring(0, 50) : 
-            'user_' + Date.now();
-        
-        // Store userId in localStorage for unsubscribe functionality
+
+        // Register service worker
+        let pushSubscription = null;
+
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+            const reg = await navigator.serviceWorker.register('/sw.js');
+            await navigator.serviceWorker.ready;
+
+            const vapidKey = await getVapidPublicKey();
+
+            pushSubscription = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(vapidKey)
+            });
+
+            state.subscription = pushSubscription;
+        }
+
+        state.userId = pushSubscription
+            ? btoa(pushSubscription.endpoint).substring(0, 50)
+            : 'user_' + Date.now();
+
         localStorage.setItem('dmv_user_id', state.userId);
-        
-        // Create subscription
-        const response = await fetch(`${API_URL}/subscriptions`, {
+
+        await fetch(`${API_URL}/subscriptions`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 user_id: state.userId,
                 push_subscription: pushSubscription ? JSON.stringify(pushSubscription.toJSON()) : null,
-                categories: [state.selectedCategory],
+                categories: state.selectedCategories,
                 locations: state.selectedLocations,
                 date_range_days: 30
             })
         });
-        
-        if (!response.ok) {
-            throw new Error('Failed to create subscription');
-        }
-        
-        // Show success screen
+
         showSuccessScreen();
-        
-    } catch (error) {
-        console.error('Error subscribing:', error);
-        showInlineError('Failed to set up notifications: ' + error.message);
-        btn.disabled = false;
-        btn.textContent = originalText;
+
+    } catch (err) {
+        console.error('Subscribe error:', err);
+        showInlineError('Failed: ' + err.message);
     }
+
+    btn.textContent = original;
+    btn.disabled = false;
 }
 
-// Make subscribe available globally
 window.subscribe = subscribe;
 
+// ============================================================================
+// SUCCESS SCREEN
+// ============================================================================
+
 function showSuccessScreen() {
-    // Get category name
-    const categoryElement = document.querySelector('.category-item.selected h4');
-    const categoryName = categoryElement ? categoryElement.textContent : state.selectedCategory;
-    
-    document.getElementById('successCategory').textContent = 
-        `Category: ${categoryName}`;
-    
-    document.getElementById('successLocations').textContent = 
-        state.selectedLocations.length > 0 ?
-        `Locations: ${state.selectedLocations.join(', ')}` :
-        `Locations: All locations in NC`;
-    
+    const categoryEl = document.getElementById('successCategory');
+    const locationsEl = document.getElementById('successLocations');
+
+    const categories = state.selectedCategories.join(', ');
+    const locations = state.selectedLocations.join(', ');
+
+    categoryEl.textContent = categories || 'All categories';
+    locationsEl.textContent = locations || 'All NC locations';
+
     showScreen('success');
 }
 
@@ -280,130 +309,114 @@ function showSuccessScreen() {
 // ============================================================================
 
 async function unsubscribe() {
-    if (!confirm('Are you sure you want to unsubscribe from DMV appointment notifications?')) {
-        return;
-    }
-    
+    if (!confirm('Unsubscribe?')) return;
+
     try {
         const userId = state.userId || localStorage.getItem('dmv_user_id');
-        
-        if (!userId) {
-            showAlert('No subscription found', 'error');
-            return;
-        }
-        
-        // Delete subscription from server
-        const response = await fetch(`${API_URL}/subscriptions/${userId}`, {
+
+        await fetch(`${API_URL}/subscriptions/${encodeURIComponent(userId)}`, {
             method: 'DELETE'
         });
-        
-        if (!response.ok && response.status !== 404) {
-            throw new Error('Failed to delete subscription');
-        }
-        
-        // Unregister push subscription if it exists
-        if ('serviceWorker' in navigator && 'PushManager' in window) {
-            try {
-                const registration = await navigator.serviceWorker.getRegistration();
-                if (registration) {
-                    const subscription = await registration.pushManager.getSubscription();
-                    if (subscription) {
-                        await subscription.unsubscribe();
-                    }
-                }
-            } catch (error) {
-                console.error('Error unsubscribing from push:', error);
+
+        if ('serviceWorker' in navigator) {
+            const reg = await navigator.serviceWorker.getRegistration();
+            if (reg) {
+                const sub = await reg.pushManager.getSubscription();
+                if (sub) await sub.unsubscribe();
             }
         }
-        
-        // Clear state
+
         state.userId = null;
         state.subscription = null;
+        state.selectedCategories = [];
+        state.selectedLocations = [];
         localStorage.removeItem('dmv_user_id');
-        
-        showAlert('Successfully unsubscribed from notifications', 'success');
-        
-        // Go back to home after 2 seconds
-        setTimeout(() => {
-            location.reload();
-        }, 2000);
-        
-    } catch (error) {
-        console.error('Error unsubscribing:', error);
-        showAlert('Failed to unsubscribe: ' + error.message, 'error');
+
+        showAlert('Unsubscribed', 'success');
+        setTimeout(() => location.reload(), 1000);
+
+    } catch (err) {
+        console.error('Unsubscribe error:', err);
+        showAlert('Failed to unsubscribe', 'error');
     }
 }
 
-// Make unsubscribe available globally
 window.unsubscribe = unsubscribe;
 
 // ============================================================================
 // TEST NOTIFICATION
 // ============================================================================
 
-async function testNotification() {
-    try {
-        if (Notification.permission === 'granted') {
-            new Notification('🧪 Test Notification', {
-                body: '✅ Your notifications are working! You will receive alerts here when DMV appointments become available.',
-                icon: '/icon-192.png',
-                badge: '/icon-192.png',
-                tag: 'test-notification'
-            });
-            
-            showAlert('Test notification sent!', 'success');
-        } else {
-            showAlert('Please allow notifications first', 'error');
-        }
-    } catch (error) {
-        console.error('Error sending test notification:', error);
-        showAlert('Failed to send test notification', 'error');
+function testNotification() {
+    if (Notification.permission === 'granted') {
+        new Notification('🧪 Test notification', {
+            body: 'Notifications working!',
+            icon: '/icon-192.png'
+        });
+        showAlert('Test sent!', 'success');
+    } else {
+        showAlert('Enable notifications first', 'error');
     }
 }
 
-// Make testNotification available globally
 window.testNotification = testNotification;
 
 // ============================================================================
 // HELPERS
 // ============================================================================
 
-function showAlert(message, type = 'info') {
+function showAlert(msg, type = 'info') {
     const alert = document.getElementById('alert');
-    alert.textContent = message;
+    alert.textContent = msg;
     alert.className = `alert ${type}`;
     alert.style.display = 'block';
-    
-    setTimeout(() => {
-        alert.style.display = 'none';
-    }, 5000);
+    setTimeout(() => alert.style.display = 'none', 4000);
 }
 
-// VAPID key conversion
-function urlBase64ToUint8Array(base64String) {
-    const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding)
-        .replace(/\-/g, '+')
-        .replace(/_/g, '/');
-    
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    
-    for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
+function urlBase64ToUint8Array(str) {
+    const pad = '='.repeat((4 - str.length % 4) % 4);
+    const base64 = (str + pad).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
 }
+
+// ============================================================================
+// RESTORE EXISTING SUBSCRIPTION
+// ============================================================================
+
+async function restoreExistingSubscription() {
+    try {
+        const savedUserId = localStorage.getItem('dmv_user_id');
+        if (!savedUserId) return false;
+
+        const resp = await fetch(`${API_URL}/subscriptions/${encodeURIComponent(savedUserId)}`);
+        if (!resp.ok) return false;
+
+        const subData = await resp.json();
+
+        state.userId = savedUserId;
+        state.selectedCategories = subData.categories || [];
+        state.selectedLocations = subData.locations || [];
+
+        showSuccessScreen();
+        showAlert('Notifications already active', 'success');
+
+        return true;
+
+    } catch (err) {
+        console.error('Restore error:', err);
+        return false;
+    }
+}
+
+// ============================================================================
+// GET VAPID KEY
+// ============================================================================
 
 async function getVapidPublicKey() {
-    try {
-        const response = await fetch(`${API_URL}/vapid-public-key`);
-        const data = await response.json();
-        return data.public_key;
-    } catch (error) {
-        console.error('Error getting VAPID key:', error);
-        throw error;
-    }
+    const resp = await fetch(`${API_URL}/vapid-public-key`);
+    const data = await resp.json();
+    return data.public_key;
 }
 
 // ============================================================================
@@ -411,17 +424,205 @@ async function getVapidPublicKey() {
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('DMV Monitor initialized');
-    
-    // Check if already installed as PWA
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-        console.log('Running as installed PWA');
+    restoreExistingSubscription();
+});
+// ============================================================================
+// LIVE AVAILABILITY POPUP (from last_check.json)
+// ============================================================================
+
+let availabilityData = [];
+
+// Format category key into pretty label
+function formatCategoryLabel(key) {
+    if (!key) return '';
+    return key
+        .split('_')
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+// Render locations list for selected category
+function renderAvailabilityList(categoryKey) {
+    const listEl = document.getElementById('availabilityList');
+    if (!listEl) {
+        return;
     }
-    
-    // Check notification support
-    if (!('Notification' in window)) {
-        console.warn('This browser does not support notifications');
+
+    if (!categoryKey) {
+        listEl.innerHTML = '<div class="availability-empty">Please choose a category.</div>';
+        return;
+    }
+
+    const items = availabilityData
+        .filter(item => item.category === categoryKey)
+        .sort((a, b) => a.location_name.localeCompare(b.location_name));
+
+    if (items.length === 0) {
+        listEl.innerHTML = '<div class="availability-empty">No locations for this category.</div>';
+        return;
+    }
+
+    listEl.innerHTML = '';
+
+    items.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'availability-row';
+
+        let lastCheckedText = 'Unknown';
+        if (item.last_checked) {
+            const d = new Date(item.last_checked);
+            if (!isNaN(d.getTime())) {
+                lastCheckedText = d.toLocaleString();
+            } else {
+                lastCheckedText = item.last_checked;
+            }
+        }
+
+        const slotsCount = typeof item.slots_count === 'number' ? item.slots_count : 0;
+        const slotsLabel = slotsCount > 0 ? `${slotsCount} slots` : 'No slots';
+        const slotsExtraClass = slotsCount > 0 ? '' : ' availability-slots-empty';
+
+        row.innerHTML = `
+            <div class="availability-main">
+                <div class="availability-location">${item.location_name}</div>
+                <div class="availability-meta">Last checked: ${lastCheckedText}</div>
+            </div>
+            <div class="availability-slots${slotsExtraClass}">
+                ${slotsLabel}
+            </div>
+        `;
+
+        listEl.appendChild(row);
+    });
+}
+
+// Open modal and load data if needed
+async function openAvailabilityModal() {
+    const modal = document.getElementById('availabilityModal');
+    const listEl = document.getElementById('availabilityList');
+    const selectEl = document.getElementById('availabilityCategorySelect');
+
+    if (!modal || !listEl || !selectEl) {
+        console.error('Availability modal elements not found');
+        return;
+    }
+
+    modal.classList.add('open');
+    document.body.classList.add('availability-modal-open');
+
+    // Если данных ещё нет - показываем загрузку
+    if (availabilityData.length === 0) {
+        listEl.innerHTML = '<div class="availability-empty">Loading availability data…</div>';
+        return;
+    }
+
+    // Заполняем категории если их ещё нет
+    if (selectEl.options.length === 0) {
+        const categories = Array.from(
+            new Set(availabilityData.map(item => item.category))
+        ).sort();
+
+        categories.forEach(catKey => {
+            const opt = document.createElement('option');
+            opt.value = catKey;
+            opt.textContent = formatCategoryLabel(catKey);
+            selectEl.appendChild(opt);
+        });
+    }
+
+    // Показываем список
+    const current = selectEl.value || (selectEl.options[0] ? selectEl.options[0].value : '');
+    if (current) {
+        selectEl.value = current;
+        renderAvailabilityList(current);
     } else {
-        console.log('Notification permission:', Notification.permission);
+        listEl.innerHTML = '<div class="availability-empty">No categories found.</div>';
     }
+}
+
+// Close modal
+function closeAvailabilityModal() {
+    const modal = document.getElementById('availabilityModal');
+    if (!modal) {
+        return;
+    }
+    modal.classList.remove('open');
+    document.body.classList.remove('availability-modal-open');
+    // Не останавливаем автообновление - оно работает постоянно
+}
+
+// Handler for category change (used in HTML onchange)
+function onAvailabilityCategoryChange() {
+    const selectEl = document.getElementById('availabilityCategorySelect');
+    if (!selectEl) {
+        return;
+    }
+    const categoryKey = selectEl.value;
+    renderAvailabilityList(categoryKey);
+}
+
+// Expose functions to window so HTML can call them
+window.openAvailabilityModal = openAvailabilityModal;
+window.closeAvailabilityModal = closeAvailabilityModal;
+window.onAvailabilityCategoryChange = onAvailabilityCategoryChange;
+
+// ============================================================================
+// AUTO-UPDATE AVAILABILITY DATA
+// ============================================================================
+
+let availabilityUpdateInterval = null;
+
+async function updateAvailabilityData() {
+    try {
+        const resp = await fetch('data/last_check.json?t=' + Date.now());
+        if (!resp.ok) {
+            throw new Error('HTTP ' + resp.status);
+        }
+        availabilityData = await resp.json();
+
+        // Если модалка открыта - обновляем UI
+        const modal = document.getElementById('availabilityModal');
+        if (modal && modal.classList.contains('open')) {
+            const selectEl = document.getElementById('availabilityCategorySelect');
+            if (selectEl) {
+                const currentValue = selectEl.value;
+
+                // Обновляем категории
+                selectEl.innerHTML = '';
+                const categories = Array.from(
+                    new Set(availabilityData.map(item => item.category))
+                ).sort();
+
+                categories.forEach(catKey => {
+                    const opt = document.createElement('option');
+                    opt.value = catKey;
+                    opt.textContent = formatCategoryLabel(catKey);
+                    selectEl.appendChild(opt);
+                });
+
+                // Восстанавливаем выбор
+                if (currentValue && categories.includes(currentValue)) {
+                    selectEl.value = currentValue;
+                } else if (selectEl.options[0]) {
+                    selectEl.value = selectEl.options[0].value;
+                }
+
+                // Обновляем список
+                renderAvailabilityList(selectEl.value);
+            }
+        }
+    } catch (err) {
+        console.error('Failed to update availability data', err);
+    }
+}
+
+// Запускаем автообновление при загрузке страницы
+document.addEventListener('DOMContentLoaded', () => {
+    restoreExistingSubscription();
+
+    // Загружаем данные сразу
+    updateAvailabilityData();
+
+    // Запускаем автообновление каждые 10 секунд
+    availabilityUpdateInterval = setInterval(updateAvailabilityData, 10000);
 });

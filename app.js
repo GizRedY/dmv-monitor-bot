@@ -275,6 +275,7 @@ async function subscribe() {
         });
 
         showSuccessScreen();
+        showDonatePopup();
 
     } catch (err) {
         console.error('Subscribe error:', err);
@@ -626,3 +627,38 @@ document.addEventListener('DOMContentLoaded', () => {
     // Запускаем автообновление каждые 10 секунд
     availabilityUpdateInterval = setInterval(updateAvailabilityData, 10000);
 });
+
+// ============================================================================
+// DONATE POPUP
+// ============================================================================
+
+function showDonatePopup() {
+    const popup = document.getElementById('donatePopup');
+    if (!popup) return;
+
+    // Показываем попап только один раз на устройство
+    if (localStorage.getItem('dmv_donate_popup_shown') === '1') {
+        return;
+    }
+
+    popup.classList.add('show');
+}
+
+function closeDonatePopup() {
+    const popup = document.getElementById('donatePopup');
+    if (!popup) return;
+
+    popup.classList.remove('show');
+    // Запоминаем, что показали попап, чтобы больше не надоедать
+    localStorage.setItem('dmv_donate_popup_shown', '1');
+}
+
+function handleDonateClick() {
+    closeDonatePopup();
+    // Открываем Ko-fi в новой вкладке
+    window.open('https://ko-fi.com/gizred', '_blank');
+}
+
+// Делаем функции доступными для HTML-атрибутов onclick
+window.closeDonatePopup = closeDonatePopup;
+window.handleDonateClick = handleDonateClick;

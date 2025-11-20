@@ -73,14 +73,14 @@ class Config:
     # Database/Storage
     data_dir: Path = Path("./data")
     subscriptions_file: Path = Path("./data/subscriptions.json")
-    last_check_file: Path = Path("./data/last_check.json")
+    last_check_file: Path = Path("./public_data/last_check.json")
 
     # Cleanup settings
     subscription_max_age_days: int = 30  # Remove subscriptions older than this
 
     # Logging
     log_file: Path = Path("./logs/dmv_monitor.log")
-    log_level: str = "INFO"
+    log_level: str = "WARNING"
 
     # VAPID keys for push notifications
     vapid_private_key: str = "pK7ehUTOBpbL0ilLgPntwnvMPBvjQYXEjrQWz1xRAtg"
@@ -744,7 +744,22 @@ class DMVMonitorService:
         try:
             self.config.data_dir.mkdir(parents=True, exist_ok=True)
 
-            availability_list = list(self.current_availability.values())
+            # НОВОЕ: Загружаем существующие данные
+            existing_data = {}
+            if self.config.last_check_file.exists():
+                with open(self.config.last_check_file, "r") as f:
+                    existing_list = json.load(f)
+                    # Преобразуем в словарь для быстрого поиска
+                    for item in existing_list:
+                        key = f"{item['category']}:{item['location_name']}"
+                        existing_data[key] = item
+
+            # НОВОЕ: Обновляем только записи из current_availability
+            for key, new_item in self.current_availability.items():
+                existing_data[key] = new_item
+
+            # Сохраняем объединённые данные
+            availability_list = list(existing_data.values())
 
             self.logger.info(f"Saving {len(availability_list)} availability entries to {self.config.last_check_file}")
 
@@ -768,10 +783,37 @@ class DMVMonitorService:
             "last_checked": availability.last_checked.isoformat()
         }
 
+    def _clear_category_from_availability(self, category_key: str):
+        """Remove all entries for a specific category from current availability"""
+        try:
+            if not self.config.last_check_file.exists():
+                return
+
+            with open(self.config.last_check_file, "r") as f:
+                existing_list = json.load(f)
+
+            # Удаляем записи этой категории
+            filtered_list = [
+                item for item in existing_list
+                if item.get('category') != category_key
+            ]
+
+            # Сохраняем обратно
+            with open(self.config.last_check_file, "w") as f:
+                json.dump(filtered_list, f, indent=2)
+
+            self.logger.info(
+                f"Cleared {len(existing_list) - len(filtered_list)} old entries for category {category_key}")
+
+        except Exception as e:
+            self.logger.error(f"Error clearing category: {e}", exc_info=True)
+
     async def monitor_category(self, category_key: str):
         """Monitor a single category"""
         try:
             self.logger.info(f"=== Monitoring category: {category_key} ===")
+
+            self._clear_category_from_availability(category_key)
 
             if not await self.scraper.navigate_to_category(category_key):
                 self.logger.error(f"Failed to navigate to category: {category_key}")

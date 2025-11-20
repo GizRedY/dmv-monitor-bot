@@ -28,12 +28,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/data", StaticFiles(directory="data"), name="data")
+app.mount("/data", StaticFiles(directory="public_data"), name="data")
 
 # Data directory
 DATA_DIR = Path("./data")
+PUBLIC_DATA_DIR = Path("./public_data")
 SUBSCRIPTIONS_FILE = DATA_DIR / "subscriptions.json"
-AVAILABILITY_FILE = DATA_DIR / "last_check.json"
+AVAILABILITY_FILE = PUBLIC_DATA_DIR / "last_check.json"
 
 
 VAPID_PRIVATE_KEY = "pK7ehUTOBpbL0ilLgPntwnvMPBvjQYXEjrQWz1xRAtg"

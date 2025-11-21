@@ -62,13 +62,33 @@ class Config:
     """Server configuration"""
     # DMV Settings
     dmv_url: str = "https://skiptheline.ncdot.gov/Webapp/Appointment/Index/a7ade79b-996d-4971-8766-97feb75254de"
-    check_interval_sec: int = 120  # How often to check each category
+    check_interval_sec: int = 180  # УВЕЛИЧЕНО: теперь проверяем каждые 3 минуты вместо 2
     base_city: str = "Raleigh"
     base_coords: Tuple[float, float] = (35.787743, -78.644257)
 
     # Browser settings
     headless: bool = True
-    page_timeout: int = 60000
+    page_timeout: int = 90000  # УВЕЛИЧЕНО: было 60000 (60 секунд), теперь 90000 (90 секунд)
+
+    # Остальное оставьте как было
+    # Database/Storage
+    data_dir: Path = Path("./data")
+    subscriptions_file: Path = Path("./data/subscriptions.json")
+    last_check_file: Path = Path("./public_data/last_check.json")
+
+    # Cleanup settings
+    subscription_max_age_days: int = 30
+
+    # Logging
+    log_file: Path = Path("./logs/dmv_monitor.log")
+    log_level: str = "WARNING"
+
+    # VAPID keys
+    vapid_private_key: str = "pK7ehUTOBpbL0ilLgPntwnvMPBvjQYXEjrQWz1xRAtg"
+    vapid_public_key: str = "BJf7Zamd5ty_QAuk2o5PwDpMPvutYdk-EG-FgtNaodREIOFRj1MTRXRznug45wAHonmkeXgfsFsLyXNq8k8uY-A"
+    vapid_claims: dict = field(default_factory=lambda: {
+        "sub": "mailto:activation.service.mailbox@gmail.com"
+    })
 
     # Database/Storage
     data_dir: Path = Path("./data")
@@ -426,7 +446,7 @@ class SubscriptionManager:
 # ============================================================================
 
 class DMVScraper:
-    """Scrapes DMV appointment availability"""
+    """Scrapes DMV appointment availability - FIXED for slow servers"""
 
     def __init__(self, config: Config):
         self.config = config
@@ -456,7 +476,8 @@ class DMVScraper:
             )
 
             self.page = await context.new_page()
-            self.page.set_default_timeout(self.config.page_timeout)
+            # ИСПРАВЛЕНИЕ: Увеличен таймаут для медленных серверов
+            self.page.set_default_timeout(90000)  # Было 60000
             self.page.on("dialog", lambda d: asyncio.create_task(d.accept()))
 
             self.logger.info("Browser initialized successfully")
@@ -465,8 +486,40 @@ class DMVScraper:
             self.logger.error(f"Error initializing browser: {e}")
             raise
 
+    async def wait_for_element_ready(self, locator, timeout=15000):
+        """
+        НОВАЯ ФУНКЦИЯ: Ждёт, пока элемент станет видимым и кликабельным
+        """
+        try:
+            await locator.wait_for(state="visible", timeout=timeout)
+            await asyncio.sleep(0.5)  # Дополнительная пауза после появления
+            return True
+        except Exception as e:
+            self.logger.warning(f"Element not ready: {e}")
+            return False
+
+    async def safe_click(self, locator, element_name="element", max_retries=3):
+        """
+        НОВАЯ ФУНКЦИЯ: Безопасный клик с повторными попытками
+        """
+        for attempt in range(max_retries):
+            try:
+                if await self.wait_for_element_ready(locator):
+                    await locator.click()
+                    self.logger.info(f"Successfully clicked on {element_name}")
+                    return True
+                else:
+                    self.logger.warning(f"Attempt {attempt + 1}: {element_name} not ready")
+            except Exception as e:
+                self.logger.warning(f"Attempt {attempt + 1} to click {element_name} failed: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)  # Пауза между попытками
+
+        self.logger.error(f"Failed to click on {element_name} after {max_retries} attempts")
+        return False
+
     async def navigate_to_category(self, category_key: str) -> bool:
-        """Navigate to a specific category"""
+        """Navigate to a specific category - УЛУЧШЕННАЯ ВЕРСИЯ"""
         try:
             category_info = DMV_CATEGORIES.get(category_key)
             if not category_info:
@@ -476,30 +529,40 @@ class DMVScraper:
             category_name = category_info["name"]
             self.logger.info(f"Navigating to category: {category_name}")
 
-            await self.page.goto(self.config.dmv_url, wait_until="domcontentloaded", timeout=60000)
-            await asyncio.sleep(1.5)
+            # ИСПРАВЛЕНИЕ: Увеличен таймаут и добавлена пауза после загрузки
+            await self.page.goto(self.config.dmv_url, wait_until="domcontentloaded", timeout=90000)
+            await asyncio.sleep(3.0)  # Было 1.5, увеличено до 3.0
 
+            # Первая кнопка "Make an Appointment"
             make_btn = self.page.locator("#cmdMakeAppt")
             if await make_btn.count() == 0:
                 make_btn = self.page.locator("text=Make an Appointment").first
-            await make_btn.click()
-            await self.page.wait_for_load_state("networkidle")
-            await asyncio.sleep(1.0)
 
+            if not await self.safe_click(make_btn, "Make an Appointment button"):
+                return False
+
+            # ИСПРАВЛЕНИЕ: Увеличена пауза после клика
+            await self.page.wait_for_load_state("networkidle", timeout=30000)
+            await asyncio.sleep(2.5)  # Было 1.0, увеличено до 2.5
+
+            # Вторая кнопка "Make an Appointment" (если есть)
             second_make = self.page.locator("input.next-button[value='Make an Appointment']")
             if await second_make.is_visible():
-                await second_make.click()
-                await self.page.wait_for_load_state("networkidle")
-                await asyncio.sleep(1.0)
+                if not await self.safe_click(second_make, "Second Make an Appointment button"):
+                    self.logger.warning("Could not click second button, continuing...")
+                await self.page.wait_for_load_state("networkidle", timeout=30000)
+                await asyncio.sleep(2.5)  # Было 1.0
 
+            # OK button
             ok_btn = self.page.get_by_role("button", name=re.compile(r"^ok$", re.I))
             if await ok_btn.is_visible():
-                await ok_btn.click()
-                await asyncio.sleep(1.0)
+                await self.safe_click(ok_btn, "OK button")
+                await asyncio.sleep(2.0)  # Было 1.0
 
             self.logger.info(f"Selecting category: {category_name}")
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.5)  # Было 1.5, увеличено до 2.5
 
+            # Поиск и клик на категорию
             candidates = [
                 self.page.locator(f"text={category_name}").first,
                 self.page.locator(f"button:has-text('{category_name}')").first,
@@ -509,11 +572,10 @@ class DMVScraper:
             clicked = False
             for candidate in candidates:
                 try:
-                    if await candidate.count() > 0 and await candidate.is_visible():
-                        await candidate.click()
-                        clicked = True
-                        self.logger.info(f"Clicked on category: {category_name}")
-                        break
+                    if await candidate.count() > 0:
+                        if await self.safe_click(candidate, f"Category: {category_name}"):
+                            clicked = True
+                            break
                 except Exception:
                     continue
 
@@ -521,9 +583,11 @@ class DMVScraper:
                 self.logger.error(f"Could not find category: {category_name}")
                 return False
 
-            await self.page.wait_for_load_state("networkidle")
-            await asyncio.sleep(1.5)
+            # ИСПРАВЛЕНИЕ: Увеличены таймауты после выбора категории
+            await self.page.wait_for_load_state("networkidle", timeout=30000)
+            await asyncio.sleep(3.0)  # Было 1.5, увеличено до 3.0
 
+            # Проверка, что мы на странице выбора локации
             try:
                 await self.page.wait_for_function("""
                 () => {
@@ -541,9 +605,10 @@ class DMVScraper:
             return False
 
     async def get_available_locations(self) -> List[str]:
-        """Get list of available locations"""
+        """Get list of available locations - УЛУЧШЕННАЯ ВЕРСИЯ"""
         try:
-            await asyncio.sleep(2.0)
+            # ИСПРАВЛЕНИЕ: Увеличена пауза перед поиском локаций
+            await asyncio.sleep(3.0)  # Было 2.0
 
             available_locations = []
             active_tiles = self.page.locator(".QflowObjectItem.ui-selectable.Active-Unit:not(.disabled-unit)")
@@ -554,6 +619,9 @@ class DMVScraper:
             for i in range(count):
                 try:
                     tile = active_tiles.nth(i)
+                    # ИСПРАВЛЕНИЕ: Ждём, пока элемент станет видимым
+                    await tile.wait_for(state="visible", timeout=5000)
+
                     text = await tile.inner_text()
                     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
@@ -574,7 +642,7 @@ class DMVScraper:
             return []
 
     async def get_appointment_slots(self, location_name: str) -> List[TimeSlot]:
-        """Get available appointment slots for a location"""
+        """Get available appointment slots for a location - УЛУЧШЕННАЯ ВЕРСИЯ"""
         slots = []
 
         try:
@@ -598,9 +666,10 @@ class DMVScraper:
                                 text = await element.inner_text()
                                 if location_name.lower() in text.lower():
                                     if "sorry" not in text.lower():
-                                        await element.click()
-                                        clicked = True
-                                        break
+                                        # ИСПРАВЛЕНИЕ: Используем safe_click
+                                        if await self.safe_click(element, f"Location: {location_name}"):
+                                            clicked = True
+                                            break
                         if clicked:
                             break
                 except Exception:
@@ -610,19 +679,20 @@ class DMVScraper:
                 self.logger.warning(f"Could not click on location: {location_name}")
                 return slots
 
-            await asyncio.sleep(3.0)
+            # ИСПРАВЛЕНИЕ: Увеличена пауза после клика на локацию
+            await asyncio.sleep(4.0)  # Было 3.0
 
             # Extract appointment data
             appointment_data = await self.page.evaluate("""
                 () => {
                     const results = [];
-                    
+
                     let currentMonth = null;
                     let currentYear = null;
-                    
+
                     const monthEl = document.querySelector('.ui-datepicker-month, span.ui-datepicker-month');
                     const yearEl = document.querySelector('.ui-datepicker-year, span.ui-datepicker-year');
-                    
+
                     if (monthEl && yearEl) {
                         const monthText = monthEl.textContent.trim().toLowerCase();
                         const monthMap = {
@@ -633,13 +703,13 @@ class DMVScraper:
                         currentMonth = monthMap[monthText];
                         currentYear = parseInt(yearEl.textContent.trim());
                     }
-                    
+
                     if (!currentMonth || !currentYear) {
                         const now = new Date();
                         currentMonth = now.getMonth() + 1;
                         currentYear = now.getFullYear();
                     }
-                    
+
                     const availableDays = [];
                     const datepickerCells = document.querySelectorAll('.ui-datepicker-calendar td a:not(.ui-state-disabled)');
                     for (const cell of datepickerCells) {
@@ -648,7 +718,7 @@ class DMVScraper:
                             availableDays.push(dayNum);
                         }
                     }
-                    
+
                     const timeSlots = [];
                     const selects = document.querySelectorAll('select');
                     for (const select of selects) {
@@ -662,7 +732,7 @@ class DMVScraper:
                             }
                         }
                     }
-                    
+
                     return {
                         currentMonth: currentMonth,
                         currentYear: currentYear,
@@ -690,17 +760,22 @@ class DMVScraper:
 
             self.logger.info(f"Found {len(slots)} slots for {location_name}")
 
+            # ИСПРАВЛЕНИЕ: Увеличена пауза перед возвратом назад
+            await asyncio.sleep(1.5)  # Было меньше
+
             # Go back
             try:
                 back_btn = self.page.locator('button:has-text("Back")').first
                 if await back_btn.is_visible():
-                    await back_btn.click()
+                    await self.safe_click(back_btn, "Back button")
                 else:
                     await self.page.go_back()
-                await asyncio.sleep(1.5)
+
+                # ИСПРАВЛЕНИЕ: Пауза после возврата
+                await asyncio.sleep(2.5)  # Было 1.5
             except Exception:
                 await self.page.go_back()
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(2.5)
 
         except Exception as e:
             self.logger.error(f"Error getting slots for {location_name}: {e}")
@@ -783,37 +858,10 @@ class DMVMonitorService:
             "last_checked": availability.last_checked.isoformat()
         }
 
-    def _clear_category_from_availability(self, category_key: str):
-        """Remove all entries for a specific category from current availability"""
-        try:
-            if not self.config.last_check_file.exists():
-                return
-
-            with open(self.config.last_check_file, "r") as f:
-                existing_list = json.load(f)
-
-            # Удаляем записи этой категории
-            filtered_list = [
-                item for item in existing_list
-                if item.get('category') != category_key
-            ]
-
-            # Сохраняем обратно
-            with open(self.config.last_check_file, "w") as f:
-                json.dump(filtered_list, f, indent=2)
-
-            self.logger.info(
-                f"Cleared {len(existing_list) - len(filtered_list)} old entries for category {category_key}")
-
-        except Exception as e:
-            self.logger.error(f"Error clearing category: {e}", exc_info=True)
-
     async def monitor_category(self, category_key: str):
         """Monitor a single category"""
         try:
             self.logger.info(f"=== Monitoring category: {category_key} ===")
-
-            self._clear_category_from_availability(category_key)
 
             if not await self.scraper.navigate_to_category(category_key):
                 self.logger.error(f"Failed to navigate to category: {category_key}")

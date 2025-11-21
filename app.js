@@ -662,3 +662,49 @@ function handleDonateClick() {
 // Делаем функции доступными для HTML-атрибутов onclick
 window.closeDonatePopup = closeDonatePopup;
 window.handleDonateClick = handleDonateClick;
+
+function skipLocations() {
+    const allLocations = NC_LOCATIONS;
+    const selected = state.selectedLocations || [];
+
+    // Проверяем, выбраны ли сейчас ВСЕ локации
+    const allSelected =
+        selected.length === allLocations.length &&
+        allLocations.every(loc => selected.includes(loc));
+
+    const grid = document.getElementById('locationGrid');
+    const btn = document.getElementById('subscribeBtn');
+
+    if (allSelected) {
+        // 🔻 Вариант 1: уже выбраны все → сбрасываем выбор
+        state.selectedLocations = [];
+
+        if (grid) {
+            grid.querySelectorAll('.location-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+        }
+
+        if (btn) {
+            btn.disabled = true; // без выбранных локаций подписываться нельзя
+        }
+    } else {
+        // 🔺 Вариант 2: выбрана часть или ничего → выбираем все
+        state.selectedLocations = [...allLocations];
+
+        if (grid) {
+            grid.querySelectorAll('.location-item').forEach(item => {
+                item.classList.add('selected');
+                // на всякий случай покажем, даже если до этого их спрятал поиск
+                item.style.display = '';
+            });
+        }
+
+        if (btn) {
+            btn.disabled = false;
+        }
+    }
+}
+
+// чтобы работало onclick="skipLocations()"
+window.skipLocations = skipLocations;

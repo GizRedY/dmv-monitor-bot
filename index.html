@@ -1281,13 +1281,14 @@ body.availability-modal-open {
                         <div class="setup-instructions" id="setup-iphone" style="display: none;">
                             <h3>📱 iPhone / iPad</h3>
                             <ol>
-                                <li><strong>Tap the Share button</strong> at the bottom of Safari.</li>
+                                <li>Open this website in <strong>Safari browser</strong> (this is required — other browsers won't work).</li>
+                                <li>Tap the <strong>Share button</strong> (⬆️ square with arrow) at the bottom or top-right of the screen.</li>
                                 <li>Select <strong>"Add to Home Screen"</strong>.</li>
-                                <li>Open the app from your Home Screen and allow notifications when asked.</li>
-                                <li>If notifications are not coming through, you can enable them manually in Settings → Apps → Notifications → Allow</li>
+                                <li>Open the app from your Home Screen.</li>
+                                <li>Allow notifications when prompted — <strong>this is required</strong> to receive alerts.</li>
                             </ol>
                             <div class="note">
-                                If you don't see the app in Settings → Notifications, open it again and repeat the signup. iOS will show the permission popup at the end.
+                                If notifications don't arrive: Settings → Apps → find the app → Notifications → Enable. If the app doesn't appear in Settings, open it again and repeat the signup — iOS will show the permission popup.
                             </div>
                         </div>
 
@@ -1295,23 +1296,29 @@ body.availability-modal-open {
                         <div class="setup-instructions" id="setup-android" style="display: none;">
                             <h3>🤖 Android</h3>
                             <ol>
-                                <li>In Chrome, tap the menu (⋮) and choose <strong>"Add to Home screen"</strong>.</li>
-                                <li>Open it from your Home Screen.</li>
-                                <li>Accept the notification permission when the browser asks.</li>
-                                <li>If notifications are not coming through, you can enable them manually in Settings → Apps → Notifications → Allow</li>
+                                <li>Open this website in <strong>Chrome browser</strong> on your Android phone.</li>
+                                <li>Tap the menu icon <strong>(⋮)</strong> in the top-right corner and select <strong>"Add to Home screen"</strong> or <strong>"Install app"</strong>.</li>
+                                <li>Confirm the installation and open the app from your Home Screen.</li>
+                                <li>Allow notifications when prompted — <strong>this is required</strong> to receive alerts.</li>
+                                <li><strong>Important:</strong> Don't fully close the app — just minimize it. Notifications only work when Chrome is running in the background.</li>
+                                <li>To prevent the app from being closed automatically: <strong>Settings → Apps → Chrome → Battery → Select "Unrestricted"</strong></li>
                             </ol>
+                            <div class="note">
+                                If notifications still don't arrive: Settings → Apps → Chrome → Notifications → Enable all
+                            </div>
                         </div>
 
                         <!-- Desktop instructions -->
                         <div class="setup-instructions" id="setup-desktop" style="display: none;">
-
                             <h3>💻 Desktop</h3>
                             <ol>
-                                <li>When the browser asks, click <strong>"Allow"</strong> for notifications.</li>
-                                <li>(Optional) Install it as an app using the install icon in the address bar.</li>
+                                <li>Open this website on your computer.</li>
+                                <li><strong>Chrome:</strong> Click the install icon (💻↓ computer with arrow) in the top-right corner of the address bar, then click "Install".</li>
+                                <li><strong>Safari:</strong> Click the <strong>Share button</strong> (⬆️ square with arrow) in the top-right or bottom of the screen, then select "Add to Dock".</li>
+                                <li>Allow notifications when prompted — <strong>this is required</strong> to receive alerts.</li>
                             </ol>
                             <div class="note">
-                                You'll receive pop-up notifications even if this tab is in the background.
+                                If notifications don't arrive: Check your system settings. <strong>Windows:</strong> Settings → System → Notifications → Make sure Chrome/Safari is enabled. <strong>Mac:</strong> System Preferences → Notifications → Find your browser → Allow notifications.
                             </div>
                         </div>
                         <button class="btn btn-primary" onclick="showScreen('category')" style="margin-top: 14px;">
@@ -1453,15 +1460,11 @@ body.availability-modal-open {
                     <ul>
                         <li>
                             <span class="side-dot"></span>
-                            <span>Allow notifications when the browser asks — otherwise we can't alert you.</span>
+                            <span>Allow notifications when the permission prompt appears — otherwise we can’t alert you.</span>
                         </li>
                         <li>
                             <span class="side-dot"></span>
-                            <span>Add this site to your home screen for a more "app-like" experience.</span>
-                        </li>
-                        <li>
-                            <span class="side-dot"></span>
-                            <span>You can close the tab — notifications will still arrive.</span>
+                            <span>When you receive a notification that a free slot has been found for your category, you can simply tap the notification and the DMV website will open, where you will need to manually book the slot</span>
                         </li>
                     </ul>
                 </div>

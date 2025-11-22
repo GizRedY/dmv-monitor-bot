@@ -36,9 +36,8 @@ PUBLIC_DATA_DIR = Path("./public_data")
 SUBSCRIPTIONS_FILE = DATA_DIR / "subscriptions.json"
 AVAILABILITY_FILE = PUBLIC_DATA_DIR / "last_check.json"
 
-
-VAPID_PRIVATE_KEY = "pK7ehUTOBpbL0ilLgPntwnvMPBvjQYXEjrQWz1xRAtg"
-VAPID_PUBLIC_KEY = "BJf7Zamd5ty_QAuk2o5PwDpMPvutYdk-EG-FgtNaodREIOFRj1MTRXRznug45wAHonmkeXgfsFsLyXNq8k8uY-A"
+vapid_private_key: str = "9stDm8G4-lI5xMFXLSQDiAWL0dIelrKAImhagQw2Gj0"
+vapid_public_key: str = "BFAncJsXiE0c_4N-hvqQOESc8_CLk3p0H0LopSKAwPq9tEMnnbREZ2vhLLTMijDy9yBwaLMnSKbeziGHmqyrrLw"
 VAPID_CLAIMS = {
     "sub": "mailto:activation.service.mailbox@gmail.com"
 }
@@ -207,6 +206,7 @@ def load_availability() -> list:
         logger.error(f"Error loading availability: {e}")
         return []
 
+
 def send_push_notification(subscription_info: dict, title: str, body: str, url: str = "/") -> bool:
     """Send push notification to a subscriber"""
     try:
@@ -215,6 +215,25 @@ def send_push_notification(subscription_info: dict, title: str, body: str, url: 
             return False
 
         push_sub = json.loads(subscription_info['push_subscription'])
+        endpoint = push_sub.get('endpoint', '')
+
+        # Determine audience based on endpoint
+        if 'apple.com' in endpoint:
+            aud = 'https://web.push.apple.com'
+        elif 'fcm.googleapis.com' in endpoint:
+            aud = 'https://fcm.googleapis.com'
+        elif 'mozilla.com' in endpoint:
+            aud = 'https://updates.push.services.mozilla.com'
+        else:
+            # Extract origin from endpoint
+            from urllib.parse import urlparse
+            parsed = urlparse(endpoint)
+            aud = f"{parsed.scheme}://{parsed.netloc}"
+
+        vapid_claims = {
+            "sub": "mailto:activation.service.mailbox@gmail.com",
+            "aud": aud
+        }
 
         notification_data = {
             "title": title,
@@ -231,8 +250,8 @@ def send_push_notification(subscription_info: dict, title: str, body: str, url: 
         webpush(
             subscription_info=push_sub,
             data=json.dumps(notification_data),
-            vapid_private_key=VAPID_PRIVATE_KEY,
-            vapid_claims=VAPID_CLAIMS
+            vapid_private_key=vapid_private_key,
+            vapid_claims=vapid_claims
         )
 
         logger.info(f"Push notification sent successfully")
@@ -240,14 +259,12 @@ def send_push_notification(subscription_info: dict, title: str, body: str, url: 
 
     except WebPushException as e:
         logger.error(f"WebPush error: {e}")
-        # If subscription is no longer valid, you might want to remove it
         if e.response and e.response.status_code in [404, 410]:
             logger.warning("Subscription no longer valid, should be removed")
         return False
     except Exception as e:
         logger.error(f"Error sending push notification: {e}")
         return False
-
 
 # ============================================================================
 # STATIC FILE SERVING
@@ -315,7 +332,7 @@ async def serve_icon_512():
 @app.get("/vapid-public-key", response_model=VapidKeyResponse)
 async def get_vapid_public_key():
     """Get VAPID public key for push notifications"""
-    return VapidKeyResponse(public_key=VAPID_PUBLIC_KEY)
+    return VapidKeyResponse(public_key=vapid_public_key)
 
 
 @app.get("/status", response_model=StatusResponse)
@@ -473,7 +490,7 @@ if __name__ == "__main__":
     )
 
     # Generate VAPID keys if not set
-    if VAPID_PRIVATE_KEY == "YOUR_PRIVATE_KEY_HERE":
+    if vapid_private_key == "YOUR_PRIVATE_KEY_HERE":
         logger.warning("=" * 80)
         logger.warning("VAPID KEYS NOT CONFIGURED!")
         logger.warning("Generate keys with: python -c \"from pywebpush import webpush; print(webpush.generate_vapid_keys())\"")

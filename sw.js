@@ -1,5 +1,5 @@
 // Service Worker for PWA and Push Notifications
-const CACHE_NAME = 'dmv-monitor-v14';
+const CACHE_NAME = 'dmv-monitor-v15';
 const urlsToCache = [
   '/app.js',
   '/manifest.json'
@@ -54,12 +54,13 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Push event - show notification
+// Push event - show notification
 self.addEventListener('push', (event) => {
   console.log('Push notification received', event);
 
   let notificationData = {
-    title: '🚗 DMV Appointment Available!',
-    body: 'New appointments have been found. Click to view details.',
+    title: 'DMV Appointment Available!',
+    body: 'New appointments have been found.',
     icon: '/icon-192.png',
     badge: '/icon-192.png',
     tag: 'dmv-appointment',
@@ -72,14 +73,19 @@ self.addEventListener('push', (event) => {
   if (event.data) {
     try {
       const data = event.data.json();
-      notificationData = {
-        ...notificationData,
-        ...data
-      };
+      notificationData = { ...notificationData, ...data };
     } catch (e) {
       console.error('Error parsing push data:', e);
+      // Try as text
+      try {
+        notificationData.body = event.data.text();
+      } catch (e2) {
+        console.error('Error getting push text:', e2);
+      }
     }
   }
+
+  console.log('Showing notification:', notificationData);
 
   event.waitUntil(
     self.registration.showNotification(notificationData.title, {
@@ -88,18 +94,11 @@ self.addEventListener('push', (event) => {
       badge: notificationData.badge,
       tag: notificationData.tag,
       requireInteraction: notificationData.requireInteraction,
-      data: notificationData.data,
-      vibrate: [200, 100, 200],
-      actions: [
-        {
-          action: 'view',
-          title: 'View Appointments'
-        },
-        {
-          action: 'close',
-          title: 'Close'
-        }
-      ]
+      data: notificationData.data
+    }).then(() => {
+      console.log('Notification shown successfully');
+    }).catch((err) => {
+      console.error('Error showing notification:', err);
     })
   );
 });

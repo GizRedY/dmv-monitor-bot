@@ -349,12 +349,33 @@ window.unsubscribe = unsubscribe;
 // ============================================================================
 
 function testNotification() {
+    console.log('testNotification called');
+
     if (Notification.permission === 'granted') {
-        new Notification('🧪 Test notification', {
-            body: 'Notifications working!',
-            icon: '/icon-192.png'
-        });
-        showAlert('Test sent!', 'success');
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready.then(function(reg) {
+                reg.showNotification('🧪 Test notification', {
+                    body: 'Notifications working!',
+                    icon: '/icon-192.png',
+                    badge: '/icon-192.png',
+                    tag: 'test-notification'
+                }).then(function() {
+                    showAlert('Test sent!', 'success');
+                }).catch(function(err) {
+                    console.error('SW notification error:', err);
+                    showAlert('Error: ' + err.message, 'error');
+                });
+            }).catch(function(err) {
+                console.error('SW ready error:', err);
+                showAlert('Error: ' + err.message, 'error');
+            });
+        } else {
+            new Notification('🧪 Test notification', {
+                body: 'Notifications working!',
+                icon: '/icon-192.png'
+            });
+            showAlert('Test sent!', 'success');
+        }
     } else {
         showAlert('Enable notifications first', 'error');
     }

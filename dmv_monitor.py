@@ -266,7 +266,8 @@ class NotificationService:
         self.config = config
         self.logger = logging.getLogger("NotificationService")
 
-    def send_push_notification(self, subscription: UserSubscription, title: str, body: str, url: str = "/") -> tuple[bool, Optional[str]]:
+    def send_push_notification(self, subscription: UserSubscription, title: str, body: str, url: str = "/") -> tuple[
+        bool, Optional[str]]:
         """Send browser push notification"""
         try:
             if not subscription.push_subscription:
@@ -274,6 +275,24 @@ class NotificationService:
                 return False, None
 
             push_sub = json.loads(subscription.push_subscription)
+            endpoint = push_sub.get('endpoint', '')
+
+            # Determine audience based on endpoint
+            if 'apple.com' in endpoint:
+                aud = 'https://web.push.apple.com'
+            elif 'fcm.googleapis.com' in endpoint:
+                aud = 'https://fcm.googleapis.com'
+            elif 'mozilla.com' in endpoint:
+                aud = 'https://updates.push.services.mozilla.com'
+            else:
+                from urllib.parse import urlparse
+                parsed = urlparse(endpoint)
+                aud = f"{parsed.scheme}://{parsed.netloc}"
+
+            vapid_claims = {
+                "sub": "mailto:activation.service.mailbox@gmail.com",
+                "aud": aud
+            }
 
             notification_data = {
                 "title": title,
@@ -291,7 +310,7 @@ class NotificationService:
                 subscription_info=push_sub,
                 data=json.dumps(notification_data),
                 vapid_private_key=self.config.vapid_private_key,
-                vapid_claims=self.config.vapid_claims
+                vapid_claims=vapid_claims
             )
 
             self.logger.info(f"Push notification sent to user {subscription.user_id}")
@@ -325,7 +344,7 @@ class NotificationService:
 
         body = "\n".join(body_lines)
 
-        return self.send_push_notification(subscription, title, body)
+        return self.send_push_notification(subscription, title, body, url="https://skiptheline.ncdot.gov/Webapp/Appointment/Index/a7ade79b-996d-4971-8766-97feb75254de")
 
 
 # ============================================================================

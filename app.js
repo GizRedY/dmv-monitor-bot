@@ -24,6 +24,18 @@ function showScreen(screenName) {
     }
     window.scrollTo(0, 0);
 
+    // Show/hide side cards based on screen (mobile only via CSS)
+    const howItWorks = document.getElementById('card-how-it-works');
+    const tips = document.getElementById('card-tips');
+
+    if (screenName === 'welcome') {
+        if (howItWorks) howItWorks.classList.remove('hide-on-mobile');
+        if (tips) tips.classList.remove('hide-on-mobile');
+    } else {
+        if (howItWorks) howItWorks.classList.add('hide-on-mobile');
+        if (tips) tips.classList.add('hide-on-mobile');
+    }
+
     if (screenName === 'category') {
         loadCategories();
     } else if (screenName === 'locations') {

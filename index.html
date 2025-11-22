@@ -14,6 +14,12 @@
     <link rel="apple-touch-icon" href="/icon-192.png">
 
     <style>
+        @media (max-width: 900px) {
+    .hide-on-mobile {
+        display: none !important;
+    }
+}
+
         /* Donate popup */
 .donate-popup-backdrop {
     position: fixed;
@@ -870,23 +876,33 @@
         }
 
         @media (max-width: 900px) {
-            .app-shell {
-                grid-template-columns: minmax(0, 1fr);
-            }
+    .app-shell {
+        grid-template-columns: minmax(0, 1fr);
+        display: flex;
+        flex-direction: column;
+    }
 
-            .app-side {
-                order: -1;
-            }
+    .app-side {
+        order: 1;
+    }
 
-            .container {
-                padding-top: 10px;
-            }
+    .app-main {
+        order: 2;
+    }
 
-            .topbar {
-                padding-top: 16px;
-                padding-bottom: 8px;
-            }
-        }
+    .hide-on-mobile {
+        display: none !important;
+    }
+
+    .container {
+        padding-top: 10px;
+    }
+
+    .topbar {
+        padding-top: 16px;
+        padding-bottom: 8px;
+    }
+}
 
         @media (max-width: 640px) {
             .app-main {
@@ -1414,7 +1430,7 @@ body.availability-modal-open {
                     </div>
                 </div>
 
-                <div class="side-card">
+                <div class="side-card" id="card-how-it-works">
                     <h4>How it works</h4>
                     <ul>
                         <li>
@@ -1432,7 +1448,7 @@ body.availability-modal-open {
                     </ul>
                 </div>
 
-                <div class="side-card">
+                <div class="side-card" id="card-tips">
                     <h4>Tips</h4>
                     <ul>
                         <li>

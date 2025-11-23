@@ -454,13 +454,6 @@ async function getVapidPublicKey() {
 }
 
 // ============================================================================
-// INITIALIZATION
-// ============================================================================
-
-document.addEventListener('DOMContentLoaded', () => {
-    restoreExistingSubscription();
-});
-// ============================================================================
 // LIVE AVAILABILITY POPUP (from last_check.json)
 // ============================================================================
 
@@ -582,7 +575,6 @@ function closeAvailabilityModal() {
     }
     modal.classList.remove('open');
     document.body.classList.remove('availability-modal-open');
-    // Не останавливаем автообновление - оно работает постоянно
 }
 
 // Handler for category change (used in HTML onchange)
@@ -650,17 +642,6 @@ async function updateAvailabilityData() {
     }
 }
 
-// Запускаем автообновление при загрузке страницы
-document.addEventListener('DOMContentLoaded', () => {
-    restoreExistingSubscription();
-
-    // Загружаем данные сразу
-    updateAvailabilityData();
-
-    // Запускаем автообновление каждые 10 секунд
-    availabilityUpdateInterval = setInterval(updateAvailabilityData, 10000);
-});
-
 // ============================================================================
 // DONATE POPUP
 // ============================================================================
@@ -695,6 +676,10 @@ function handleDonateClick() {
 // Делаем функции доступными для HTML-атрибутов onclick
 window.closeDonatePopup = closeDonatePopup;
 window.handleDonateClick = handleDonateClick;
+
+// ============================================================================
+// SKIP LOCATIONS (SELECT/DESELECT ALL)
+// ============================================================================
 
 function skipLocations() {
     const allLocations = NC_LOCATIONS;
@@ -741,3 +726,90 @@ function skipLocations() {
 
 // чтобы работало onclick="skipLocations()"
 window.skipLocations = skipLocations;
+
+// ============================================================================
+// INSTRUCTIONS MODAL
+// ============================================================================
+
+function openInstructionsModal() {
+    const modal = document.getElementById('instructionsModal');
+    if (!modal) {
+        console.error('Instructions modal not found');
+        return;
+    }
+
+    modal.classList.add('open');
+    document.body.classList.add('availability-modal-open');
+
+    // Hide all instruction blocks
+    document.querySelectorAll('[id^="modal-setup-"]').forEach(el => {
+        el.style.display = 'none';
+    });
+}
+
+function closeInstructionsModal() {
+    const modal = document.getElementById('instructionsModal');
+    if (!modal) return;
+
+    modal.classList.remove('open');
+    document.body.classList.remove('availability-modal-open');
+}
+
+function showInstructionForPlatform(platform) {
+    // Hide all
+    document.querySelectorAll('[id^="modal-setup-"]').forEach(el => {
+        el.style.display = 'none';
+    });
+
+    // Show selected
+    const instructionEl = document.getElementById(`modal-setup-${platform}`);
+    if (instructionEl) {
+        instructionEl.style.display = 'block';
+    }
+}
+
+window.openInstructionsModal = openInstructionsModal;
+window.closeInstructionsModal = closeInstructionsModal;
+window.showInstructionForPlatform = showInstructionForPlatform;
+
+// ============================================================================
+// INITIALIZATION - SINGLE DOMContentLoaded HANDLER
+// ============================================================================
+
+// 🔥 CRITICAL: Define all window functions BEFORE DOMContentLoaded
+// This ensures onclick handlers work immediately
+console.log('App.js loaded, defining window functions...');
+
+// Re-export all functions to window to ensure they're available
+window.showScreen = showScreen;
+window.selectPlatform = selectPlatform;
+window.subscribe = subscribe;
+window.unsubscribe = unsubscribe;
+window.testNotification = testNotification;
+window.openAvailabilityModal = openAvailabilityModal;
+window.closeAvailabilityModal = closeAvailabilityModal;
+window.onAvailabilityCategoryChange = onAvailabilityCategoryChange;
+window.closeDonatePopup = closeDonatePopup;
+window.handleDonateClick = handleDonateClick;
+window.skipLocations = skipLocations;
+window.openInstructionsModal = openInstructionsModal;
+window.closeInstructionsModal = closeInstructionsModal;
+window.showInstructionForPlatform = showInstructionForPlatform;
+window.filterLocations = filterLocations;
+
+console.log('All window functions defined successfully');
+
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM loaded, initializing app...');
+
+    // Restore existing subscription
+    restoreExistingSubscription();
+
+    // Load availability data immediately
+    updateAvailabilityData();
+
+    // Start auto-update every 10 seconds
+    availabilityUpdateInterval = setInterval(updateAvailabilityData, 10000);
+
+    console.log('App initialized successfully');
+});

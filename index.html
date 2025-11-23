@@ -1150,6 +1150,7 @@ body.availability-modal-open {
 }
 
 </style>
+    <script src="/app.js"></script>
 </head>
 <body>
 <div class="page-shell">
@@ -1399,16 +1400,20 @@ body.availability-modal-open {
                                 <p style="margin-top: 4px;"><span class="label">Locations:</span> <span id="successLocations"></span></p>
                             </div>
 
+                            <div style="margin-top: 14px; padding: 10px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.5); border-radius: 10px; font-size: 0.85rem; color: #FDE68A;">
+                                ⏰ <strong>Important:</strong> Your subscription will automatically expire in 3 days. You'll need to resubscribe to continue receiving notifications.
+                            </div>
+
                             <button class="btn btn-secondary" onclick="testNotification()" style="margin-top: 14px;">
                                 🧪 Send test notification
                             </button>
 
-                            <button class="btn btn-danger" onclick="unsubscribe()" style="margin-top: 10px;">
-                                🔕 Unsubscribe
+                            <button class="btn btn-secondary" onclick="openInstructionsModal()" style="margin-top: 10px;">
+                                📖 View setup instructions
                             </button>
 
-                            <button class="btn btn-primary" onclick="location.reload()" style="margin-top: 10px;">
-                                ← Back to start
+                            <button class="btn btn-danger" onclick="unsubscribe()" style="margin-top: 10px;">
+                                🔕 Unsubscribe
                             </button>
                         </div>
                     </div>
@@ -1496,7 +1501,109 @@ body.availability-modal-open {
     </footer>
 </div>
 
-<script src="/app.js"></script>
+
+<!-- Instructions Modal -->
+<div id="instructionsModal" class="availability-modal-backdrop">
+    <div class="availability-modal" style="max-width: 560px;">
+        <div class="availability-modal-header">
+            <div>
+                <div class="availability-title" style="font-size: 1.1rem;">Setup Instructions</div>
+                <div class="availability-subtitle">
+                    Choose your device to see platform-specific instructions
+                </div>
+            </div>
+            <button
+                type="button"
+                class="availability-close-btn"
+                onclick="closeInstructionsModal()"
+            >
+                ✕
+            </button>
+        </div>
+
+        <div class="availability-inner">
+            <div class="platform-grid">
+                <div class="platform-btn" onclick="showInstructionForPlatform('iphone')">
+                    <div class="platform-main">
+                        <div class="icon">📱</div>
+                        <div class="info">
+                            <h3>iPhone / iPad</h3>
+                            <p>Use Safari for the best experience.</p>
+                        </div>
+                    </div>
+                    <div class="platform-tag">Safari</div>
+                </div>
+
+                <div class="platform-btn" onclick="showInstructionForPlatform('android')">
+                    <div class="platform-main">
+                        <div class="icon">🤖</div>
+                        <div class="info">
+                            <h3>Android phone</h3>
+                            <p>Works great with Chrome.</p>
+                        </div>
+                    </div>
+                    <div class="platform-tag">Chrome</div>
+                </div>
+
+                <div class="platform-btn" onclick="showInstructionForPlatform('desktop')">
+                    <div class="platform-main">
+                        <div class="icon">💻</div>
+                        <div class="info">
+                            <h3>Desktop / Laptop</h3>
+                            <p>Any modern browser is supported.</p>
+                        </div>
+                    </div>
+                    <div class="platform-tag">Browser</div>
+                </div>
+            </div>
+
+            <!-- iPhone instructions -->
+            <div class="setup-instructions" id="modal-setup-iphone" style="display: none; margin-top: 14px;">
+                <h3>📱 iPhone / iPad</h3>
+                <ol>
+                    <li>Open this website in <strong>Safari browser</strong> (this is required – other browsers won't work).</li>
+                    <li>Tap the <strong>Share button</strong> (⬆️ square with arrow) at the bottom or top-right of the screen.</li>
+                    <li>Select <strong>"Add to Home Screen"</strong>.</li>
+                    <li>Open the app from your Home Screen.</li>
+                    <li>Allow notifications when prompted – <strong>this is required</strong> to receive alerts.</li>
+                </ol>
+                <div class="note">
+                    If notifications don't arrive: Settings → Apps → find the app → Notifications → Enable. If the app doesn't appear in Settings, open it again and repeat the signup – iOS will show the permission popup.
+                </div>
+            </div>
+
+            <!-- Android instructions -->
+            <div class="setup-instructions" id="modal-setup-android" style="display: none; margin-top: 14px;">
+                <h3>🤖 Android</h3>
+                <ol>
+                    <li>Open this website in <strong>Chrome browser</strong> on your Android phone.</li>
+                    <li>Tap the menu icon <strong>(⋮)</strong> in the top-right corner and select <strong>"Add to Home screen"</strong> or <strong>"Install app"</strong>.</li>
+                    <li>Confirm the installation and open the app from your Home Screen.</li>
+                    <li>Allow notifications when prompted – <strong>this is required</strong> to receive alerts.</li>
+                    <li><strong>Important:</strong> Don't fully close the app – just minimize it. Notifications only work when Chrome is running in the background.</li>
+                    <li>To prevent the app from being closed automatically: <strong>Settings → Apps → Chrome → Battery → Select "Unrestricted"</strong></li>
+                </ol>
+                <div class="note">
+                    If notifications still don't arrive: Settings → Apps → Chrome → Notifications → Enable all
+                </div>
+            </div>
+
+            <!-- Desktop instructions -->
+            <div class="setup-instructions" id="modal-setup-desktop" style="display: none; margin-top: 14px;">
+                <h3>💻 Desktop</h3>
+                <ol>
+                    <li>Open this website on your computer.</li>
+                    <li><strong>Chrome:</strong> Click the install icon (💻↓ computer with arrow) in the top-right corner of the address bar, then click "Install".</li>
+                    <li><strong>Safari:</strong> Click the <strong>Share button</strong> (⬆️ square with arrow) in the top-right or bottom of the screen, then select "Add to Dock".</li>
+                    <li>Allow notifications when prompted – <strong>this is required</strong> to receive alerts.</li>
+                </ol>
+                <div class="note">
+                    If notifications don't arrive: Check your system settings. <strong>Windows:</strong> Settings → System → Notifications → Make sure Chrome/Safari is enabled. <strong>Mac:</strong> System Preferences → Notifications → Find your browser → Allow notifications.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div id="availabilityModal" class="availability-modal-backdrop">
     <div class="availability-modal">

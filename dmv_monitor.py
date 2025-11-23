@@ -81,7 +81,7 @@ class Config:
     last_check_file: Path = Path("./public_data/last_check.json")
 
     # Cleanup settings
-    subscription_max_age_days: int = 30
+    subscription_max_age_days: int = 3
 
     # Logging
     log_file: Path = Path("./logs/dmv_monitor.log")
@@ -683,17 +683,35 @@ class DMVScraper:
             await self.page.wait_for_load_state("networkidle", timeout=40000)
             await asyncio.sleep(4)
 
-            # Проверка, что мы на странице выбора локации
+            # 🔧 УЛУЧШЕННАЯ проверка страницы выбора локации с защитой от null
             try:
+                # Ждем появления любого из признаков страницы локаций
                 await self.page.wait_for_function("""
-                () => {
-                    const text = document.body.innerText || '';
-                    return text.includes('Select a Location') || text.includes('select a location');
-                }""", timeout=30000)
+                            () => {
+                                // Защита от null/undefined
+                                if (!document.body) return false;
+
+                                const text = (document.body.innerText || '').toLowerCase();
+                                const hasLocationText = text.includes('select a location') || 
+                                                       text.includes('choose a location');
+                                const hasLocationTiles = document.querySelectorAll('.QflowObjectItem').length > 0;
+                                const hasLocationDropdown = document.querySelector('select[name*="location"]') !== null;
+
+                                return hasLocationText || hasLocationTiles || hasLocationDropdown;
+                            }""", timeout=35000)
                 self.logger.info("✅ Reached location selection page")
                 return True
-            except Exception:
-                self.logger.warning("⚠️ Did not find 'Select a Location' text, but continuing...")
+            except Exception as e:
+                # Дополнительная проверка: есть ли вообще элементы локаций?
+                try:
+                    tiles_count = await self.page.locator('.QflowObjectItem').count()
+                    if tiles_count > 0:
+                        self.logger.info(f"✅ Found {tiles_count} location tiles, proceeding")
+                        return True
+                except:
+                    pass
+
+                self.logger.warning(f"⚠️ Could not verify location page, but continuing... ({str(e)[:100]})")
                 return True
 
         except Exception as e:

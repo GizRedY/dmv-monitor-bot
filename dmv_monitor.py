@@ -142,6 +142,7 @@ class UserSubscription:
     date_range_days: int = 30
     created_at: datetime = field(default_factory=datetime.now)
     last_notification_sent: Optional[datetime] = None
+    failed_attempts: int = 0
 
     def to_dict(self):
         return {
@@ -151,7 +152,8 @@ class UserSubscription:
             "locations": list(self.locations),
             "date_range_days": self.date_range_days,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
-            "last_notification_sent": self.last_notification_sent.isoformat() if self.last_notification_sent else None
+            "last_notification_sent": self.last_notification_sent.isoformat() if self.last_notification_sent else None,
+            "failed_attempts": self.failed_attempts
         }
 
 
@@ -360,6 +362,19 @@ class SubscriptionManager:
         self.logger = logging.getLogger("SubscriptionManager")
         self.load_subscriptions()
 
+    def increment_failed_attempts(self, user_id: str):
+        """Increment failed notification attempts counter"""
+        if user_id in self.subscriptions:
+            self.subscriptions[user_id].failed_attempts += 1
+            self.save_subscriptions()
+            self.logger.warning(f"Failed attempts for {user_id}: {self.subscriptions[user_id].failed_attempts}")
+
+    def reset_failed_attempts(self, user_id: str):
+        """Reset failed attempts counter after successful notification"""
+        if user_id in self.subscriptions:
+            self.subscriptions[user_id].failed_attempts = 0
+            self.save_subscriptions()
+
     def load_subscriptions(self):
         """Load subscriptions from file"""
         try:
@@ -393,7 +408,8 @@ class SubscriptionManager:
                         locations=set(user_data.get('locations', [])),
                         date_range_days=user_data.get('date_range_days', 30),
                         created_at=created_at,
-                        last_notification_sent=last_notification_sent
+                        last_notification_sent=last_notification_sent,
+                        failed_attempts=user_data.get('failed_attempts', 0)
                     )
                     self.subscriptions[sub.user_id] = sub
                     loaded_count += 1
@@ -1013,11 +1029,18 @@ class DMVMonitorService:
                                 if success:
                                     self.logger.info(f"✅ Successfully notified user {user.user_id}")
                                     self.subscription_manager.update_last_notification(user.user_id)
+                                    self.subscription_manager.reset_failed_attempts(user.user_id)
                                 elif error_type == 'invalid_subscription':
                                     self.logger.info(f"🗑️ Removing invalid subscription for user {user.user_id}")
                                     self.subscription_manager.remove_subscription(user.user_id)
                                 else:
                                     self.logger.warning(f"⚠️ Failed to notify user {user.user_id}")
+                                    self.subscription_manager.increment_failed_attempts(user.user_id)
+
+                                    if user.failed_attempts >= 3:
+                                        self.logger.info(
+                                            f"🗑️ Removing subscription after 3 failed attempts: {user.user_id}")
+                                        self.subscription_manager.remove_subscription(user.user_id)
 
                             self.last_seen_slots[key] = current_slots_set
                         else:

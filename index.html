@@ -824,6 +824,7 @@
             font-size: 0.78rem;
             display: flex;
             justify-content: space-between;
+            align-items: center;
             flex-wrap: wrap;
             gap: 4px;
         }
@@ -836,7 +837,24 @@
 
         .footer a:hover {
             color: #CBD5E1;
-            text-decoration: underline;
+        }
+
+        .linkedin-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 6px;
+            border-radius: 6px;
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            transition: all 0.2s ease;
+        }
+
+        .linkedin-link:hover {
+            background: rgba(99, 102, 241, 0.2);
+            border-color: rgba(99, 102, 241, 0.5);
+            transform: translateY(-1px);
+            text-decoration: none;
         }
 
         .features-grid {
@@ -1497,7 +1515,12 @@ body.availability-modal-open {
 
     <footer class="footer">
         <span>Free NC DMV appointment notifications (unofficial helper tool).</span>
-        <span>Notifications powered by your browser.</span>
+        <span>
+            Author:
+            <a href="https://www.linkedin.com/in/mikhail-drogalev-a4bbab341/" target="_blank" rel="noopener noreferrer" class="linkedin-link">
+                💼 LinkedIn
+            </a>
+        </span>
     </footer>
 </div>
 

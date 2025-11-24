@@ -324,6 +324,30 @@ async def serve_icon_512():
         return FileResponse(icon_file, media_type="image/png")
     return HTMLResponse("Icon not found", status_code=404)
 
+@app.get("/googlebe0bcdc73702fcd4.html")
+async def serve_google_verification():
+    """Serve Google verification file"""
+    verification_file = Path("./googlebe0bcdc73702fcd4.html")
+    if verification_file.exists():
+        return FileResponse(verification_file, media_type="text/html")
+    return HTMLResponse("Google verification file not found", status_code=404)
+
+@app.get("/sitemap.xml")
+async def serve_sitemap():
+    """Serve sitemap.xml"""
+    sitemap_file = Path("./sitemap.xml")
+    if sitemap_file.exists():
+        return FileResponse(sitemap_file, media_type="application/xml")
+    return HTMLResponse("Sitemap not found", status_code=404)
+
+
+@app.get("/robots.txt")
+async def serve_robots():
+    """Serve robots.txt"""
+    robots_file = Path("./robots.txt")
+    if robots_file.exists():
+        return FileResponse(robots_file, media_type="text/plain")
+    return HTMLResponse("Robots.txt not found", status_code=404)
 
 # ============================================================================
 # API ENDPOINTS

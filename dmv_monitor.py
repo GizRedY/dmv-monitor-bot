@@ -66,8 +66,8 @@ class Config:
 
     # Browser settings - 🔧 КРИТИЧЕСКИ ВАЖНО ДЛЯ СТАБИЛЬНОСТИ
     headless: bool = True
-    page_timeout: int = 180000
-    navigation_timeout: int = 140000
+    page_timeout: int = 30000
+    navigation_timeout: int = 25000
 
     # 🔧 НОВОЕ: Перезапуск браузера после N категорий
     browser_restart_after_categories: int = 3

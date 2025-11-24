@@ -66,14 +66,16 @@ class Config:
 
     # Browser settings - 🔧 КРИТИЧЕСКИ ВАЖНО ДЛЯ СТАБИЛЬНОСТИ
     headless: bool = True
-    page_timeout: int = 120000  # 🔧 2 минуты вместо 90 секунд
-    navigation_timeout: int = 120000  # 🔧 2 минуты для навигации
+    page_timeout: int = 180000
+    navigation_timeout: int = 140000
 
     # 🔧 НОВОЕ: Перезапуск браузера после N категорий
     browser_restart_after_categories: int = 3
 
     # 🔧 НОВОЕ: Максимум попыток при ошибке
     max_retries_on_error: int = 2
+
+    location_click_timeout: int = 60000
 
     # Database/Storage
     data_dir: Path = Path("./data")
@@ -85,7 +87,7 @@ class Config:
 
     # Logging
     log_file: Path = Path("./logs/dmv_monitor.log")
-    log_level: str = "WARNING"  # 🔧 Изменено на INFO для лучшей диагностики
+    log_level: str = "INFO"  # 🔧 Изменено на INFO /  WARNINGдля лучшей диагностики
 
     # VAPID keys
     vapid_private_key: str = "9stDm8G4-lI5xMFXLSQDiAWL0dIelrKAImhagQw2Gj0"
@@ -421,14 +423,30 @@ class SubscriptionManager:
             self.logger.error(f"Error loading subscriptions: {e}")
 
     def save_subscriptions(self):
-        """Save subscriptions to file"""
+        """Save subscriptions to file (atomic write)"""
         try:
+            # Гарантируем, что папка существует
             self.config.data_dir.mkdir(parents=True, exist_ok=True)
-            with open(self.config.subscriptions_file, 'w') as f:
-                json.dump([sub.to_dict() for sub in self.subscriptions.values()], f, indent=2)
-            self.logger.debug(f"Saved {len(self.subscriptions)} subscriptions")
+
+            # Данные для записи — как и раньше: список словарей
+            data = [sub.to_dict() for sub in self.subscriptions.values()]
+
+            # Временный файл рядом с основным
+            tmp_path = self.config.subscriptions_file.with_suffix(
+                self.config.subscriptions_file.suffix + ".tmp"
+            )
+
+            # 1) Пишем во временный файл
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+            # 2) Атомарно заменяем старый файл новым
+            os.replace(tmp_path, self.config.subscriptions_file)
+
+            self.logger.debug(f"Saved {len(self.subscriptions)} subscriptions (atomic)")
         except Exception as e:
-            self.logger.error(f"Error saving subscriptions: {e}")
+            # ВАЖНО: если что-то пошло не так, старый subscriptions.json останется нетронутым
+            self.logger.error(f"Error saving subscriptions: {e}", exc_info=True)
 
     def remove_subscription(self, user_id: str):
         """Remove a subscription"""
@@ -563,7 +581,7 @@ class DMVScraper:
         self.logger.info("🔄 Restarting browser to free resources...")
         try:
             await self.close()
-            await asyncio.sleep(3)  # Дать время системе освободить ресурсы
+            await asyncio.sleep(1.5)  # Дать время системе освободить ресурсы
             await self.initialize()
             self.logger.info("✅ Browser restarted successfully")
         except Exception as e:
@@ -577,7 +595,7 @@ class DMVScraper:
             try:
                 self.logger.info(f"🌐 Navigating to {url} (attempt {attempt + 1}/{max_attempts})")
                 await self.page.goto(url, wait_until=wait_until, timeout=self.config.navigation_timeout)
-                await asyncio.sleep(4)  # Увеличенная пауза
+                await asyncio.sleep(2)  # Увеличенная пауза
                 return True
             except Exception as e:
                 self.logger.warning(f"⚠️ Navigation attempt {attempt + 1} failed: {e}")
@@ -588,7 +606,7 @@ class DMVScraper:
                     return False
         return False
 
-    async def wait_for_element_ready(self, locator, timeout=20000):
+    async def wait_for_element_ready(self, locator, timeout=8000):
         """Ждёт, пока элемент станет видимым и кликабельным"""
         try:
             await locator.wait_for(state="visible", timeout=timeout)
@@ -598,12 +616,12 @@ class DMVScraper:
             self.logger.warning(f"⚠️ Element not ready: {e}")
             return False
 
-    async def safe_click(self, locator, element_name="element", max_retries=3):
+    async def safe_click(self, locator, element_name="element", max_retries=2):  # 🔥 Снизил до 2 попыток
         """Безопасный клик с повторными попытками"""
         for attempt in range(max_retries):
             try:
-                if await self.wait_for_element_ready(locator):
-                    await locator.click()
+                if await self.wait_for_element_ready(locator, timeout=5000):  # 🔥 10 сек вместо 20
+                    await locator.click(timeout=5000)  # 🔥 Добавил таймаут на клик
                     self.logger.info(f"✅ Successfully clicked on {element_name}")
                     return True
                 else:
@@ -611,7 +629,7 @@ class DMVScraper:
             except Exception as e:
                 self.logger.warning(f"⚠️ Attempt {attempt + 1} to click {element_name} failed: {e}")
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(2)  # 🔥 Сократил паузу с 3 до 2 сек
 
         self.logger.error(f"❌ Failed to click on {element_name} after {max_retries} attempts")
         return False
@@ -640,7 +658,7 @@ class DMVScraper:
                 return False
 
             await self.page.wait_for_load_state("networkidle", timeout=40000)
-            await asyncio.sleep(3)
+            await asyncio.sleep(1.5)
 
             # Вторая кнопка "Make an Appointment" (если есть)
             second_make = self.page.locator("input.next-button[value='Make an Appointment']")
@@ -648,7 +666,7 @@ class DMVScraper:
                 if not await self.safe_click(second_make, "Second Make an Appointment button"):
                     self.logger.warning("⚠️ Could not click second button, continuing...")
                 await self.page.wait_for_load_state("networkidle", timeout=40000)
-                await asyncio.sleep(3)
+                await asyncio.sleep(1.5)
 
             # OK button
             ok_btn = self.page.get_by_role("button", name=re.compile(r"^ok$", re.I))
@@ -657,7 +675,7 @@ class DMVScraper:
                 await asyncio.sleep(2)
 
             self.logger.info(f"🔍 Selecting category: {category_name}")
-            await asyncio.sleep(3)
+            await asyncio.sleep(1.5)
 
             # Поиск и клик на категорию
             candidates = [
@@ -681,7 +699,7 @@ class DMVScraper:
                 return False
 
             await self.page.wait_for_load_state("networkidle", timeout=40000)
-            await asyncio.sleep(4)
+            await asyncio.sleep(2)
 
             # 🔧 УЛУЧШЕННАЯ проверка страницы выбора локации с защитой от null
             try:
@@ -721,7 +739,7 @@ class DMVScraper:
     async def get_available_locations(self) -> List[str]:
         """Get list of available locations"""
         try:
-            await asyncio.sleep(4)
+            await asyncio.sleep(2)
 
             available_locations = []
             active_tiles = self.page.locator(".QflowObjectItem.ui-selectable.Active-Unit:not(.disabled-unit)")
@@ -790,7 +808,7 @@ class DMVScraper:
                 self.logger.warning(f"⚠️ Could not click on location: {location_name}")
                 return slots
 
-            await asyncio.sleep(5)  # Увеличенная пауза после клика на локацию
+            await asyncio.sleep(2)  # Увеличенная пауза после клика на локацию
 
             # Extract appointment data
             appointment_data = await self.page.evaluate("""
@@ -880,10 +898,10 @@ class DMVScraper:
                 else:
                     await self.page.go_back()
 
-                await asyncio.sleep(3)
+                await asyncio.sleep(1.5)
             except Exception:
                 await self.page.go_back()
-                await asyncio.sleep(3)
+                await asyncio.sleep(1.5)
 
         except Exception as e:
             self.logger.error(f"❌ Error getting slots for {location_name}: {e}")
@@ -969,22 +987,48 @@ class DMVMonitorService:
         }
 
     async def monitor_category(self, category_key: str) -> bool:
-        """🔧 Monitor a single category - returns success status"""
-        try:
-            self.logger.info(f"{'='*60}")
-            self.logger.info(f"📂 Monitoring category: {category_key}")
-            self.logger.info(f"{'='*60}")
+        """Monitor a single category with better error recovery"""
+        max_retries = 3  # 🔥 Максимум попыток при ошибке
 
-            if not await self.scraper.navigate_to_category(category_key):
-                self.logger.error(f"❌ Failed to navigate to category: {category_key}")
-                return False
+        for attempt in range(max_retries):
+            try:
+                self.logger.info(f"{'=' * 60}")
+                self.logger.info(f"📂 Monitoring category: {category_key} (attempt {attempt + 1}/{max_retries})")
+                self.logger.info(f"{'=' * 60}")
 
-            available_locations = await self.scraper.get_available_locations()
+                if not await self.scraper.navigate_to_category(category_key):
+                    self.logger.error(f"❌ Failed to navigate to category: {category_key}")
 
-            if not available_locations:
-                self.logger.info(f"📭 No available locations for category: {category_key}")
+                    # 🔥 При провале навигации - перезапускаем браузер
+                    if attempt < max_retries - 1:
+                        self.logger.warning(f"🔄 Restarting browser after navigation failure...")
+                        await self.scraper.restart_browser()
+                        await asyncio.sleep(5)
+                        continue
+                    else:
+                        return False
 
-                # Записываем ВСЕ локации NC с 0 слотами
+                available_locations = await self.scraper.get_available_locations()
+
+                if not available_locations:
+                    self.logger.info(f"🔭 No available locations for category: {category_key}")
+
+                    # Записываем ВСЕ локации NC с 0 слотами
+                    for location in ALL_NC_LOCATIONS:
+                        availability = LocationAvailability(
+                            location_name=location,
+                            category=category_key,
+                            slots=[]
+                        )
+                        self._update_availability_entry(availability)
+
+                    self.logger.info(f"📝 Recorded all {len(ALL_NC_LOCATIONS)} NC locations with 0 slots")
+                    self._save_current_availability()
+                    return True
+
+                self.logger.info(f"✅ Found {len(available_locations)} available locations for {category_key}")
+
+                # Сначала записываем ВСЕ локации с 0 слотами
                 for location in ALL_NC_LOCATIONS:
                     availability = LocationAvailability(
                         location_name=location,
@@ -993,90 +1037,102 @@ class DMVMonitorService:
                     )
                     self._update_availability_entry(availability)
 
-                self.logger.info(f"📝 Recorded all {len(ALL_NC_LOCATIONS)} NC locations with 0 slots")
+                # Теперь проверяем доступные локации
+                locations_checked = 0
+                for location in available_locations:
+                    try:
+                        self.logger.info(f"🔍 Checking slots for {location} in {category_key}")
+                        slots = await self.scraper.get_appointment_slots(location)
+                        locations_checked += 1
+
+                        availability = LocationAvailability(
+                            location_name=location,
+                            category=category_key,
+                            slots=slots
+                        )
+
+                        self._update_availability_entry(availability)
+                        self.logger.info(f"✅ Updated availability for {location}: {len(slots)} slots")
+
+                        if slots:
+                            key = f"{category_key}:{location}"
+                            current_slots_set = {str(slot) for slot in slots}
+
+                            if key not in self.last_seen_slots:
+                                self.last_seen_slots[key] = set()
+
+                            new_slots = current_slots_set - self.last_seen_slots[key]
+
+                            if new_slots:
+                                self.logger.info(f"🎉 NEW SLOTS FOUND for {location}: {len(new_slots)} new slots!")
+
+                                interested_users = self.subscription_manager.get_interested_users(
+                                    category_key, location
+                                )
+
+                                self.logger.info(f"👥 Found {len(interested_users)} interested users")
+
+                                for user in interested_users:
+                                    success, error_type = self.notification_service.notify_user(user, availability)
+
+                                    if success:
+                                        self.logger.info(f"✅ Successfully notified user {user.user_id}")
+                                        self.subscription_manager.update_last_notification(user.user_id)
+                                        self.subscription_manager.reset_failed_attempts(user.user_id)
+                                    elif error_type == 'invalid_subscription':
+                                        self.logger.info(f"🗑️ Removing invalid subscription for user {user.user_id}")
+                                        self.subscription_manager.remove_subscription(user.user_id)
+                                    else:
+                                        self.logger.warning(f"⚠️ Failed to notify user {user.user_id}")
+                                        self.subscription_manager.increment_failed_attempts(user.user_id)
+
+                                        if user.failed_attempts >= 3:
+                                            self.logger.info(
+                                                f"🗑️ Removing subscription after 3 failed attempts: {user.user_id}")
+                                            self.subscription_manager.remove_subscription(user.user_id)
+
+                                self.last_seen_slots[key] = current_slots_set
+                            else:
+                                self.logger.info(
+                                    f"ℹ️ No new slots for {location} (already seen all {len(slots)} slots)")
+                        else:
+                            self.logger.info(f"🔭 No available slots for {location}")
+
+                    except Exception as e:
+                        self.logger.error(f"❌ Error checking location {location}: {e}", exc_info=True)
+
+                        # 🔥 КРИТИЧНО: Если словили "context destroyed" - сразу выходим
+                        if "context was destroyed" in str(e).lower():
+                            self.logger.error(f"💥 Browser context destroyed! Need restart.")
+                            raise  # Пробрасываем ошибку наверх для перезапуска
+
+                        continue
+
+                self.logger.info(
+                    f"✅ Finished checking category {category_key} ({locations_checked} locations), saving results...")
                 self._save_current_availability()
                 return True
 
-            self.logger.info(f"✅ Found {len(available_locations)} available locations for {category_key}")
+            except Exception as e:
+                self.logger.error(f"❌ Error monitoring category {category_key} (attempt {attempt + 1}): {e}",
+                                  exc_info=True)
 
-            # Сначала записываем ВСЕ локации с 0 слотами
-            for location in ALL_NC_LOCATIONS:
-                availability = LocationAvailability(
-                    location_name=location,
-                    category=category_key,
-                    slots=[]
-                )
-                self._update_availability_entry(availability)
-
-            # Теперь проверяем доступные локации
-            for location in available_locations:
-                try:
-                    self.logger.info(f"🔍 Checking slots for {location} in {category_key}")
-                    slots = await self.scraper.get_appointment_slots(location)
-
-                    availability = LocationAvailability(
-                        location_name=location,
-                        category=category_key,
-                        slots=slots
-                    )
-
-                    self._update_availability_entry(availability)
-                    self.logger.info(f"✅ Updated availability for {location}: {len(slots)} slots")
-
-                    if slots:
-                        key = f"{category_key}:{location}"
-                        current_slots_set = {str(slot) for slot in slots}
-
-                        if key not in self.last_seen_slots:
-                            self.last_seen_slots[key] = set()
-
-                        new_slots = current_slots_set - self.last_seen_slots[key]
-
-                        if new_slots:
-                            self.logger.info(f"🎉 NEW SLOTS FOUND for {location}: {len(new_slots)} new slots!")
-
-                            interested_users = self.subscription_manager.get_interested_users(
-                                category_key, location
-                            )
-
-                            self.logger.info(f"👥 Found {len(interested_users)} interested users")
-
-                            for user in interested_users:
-                                success, error_type = self.notification_service.notify_user(user, availability)
-
-                                if success:
-                                    self.logger.info(f"✅ Successfully notified user {user.user_id}")
-                                    self.subscription_manager.update_last_notification(user.user_id)
-                                    self.subscription_manager.reset_failed_attempts(user.user_id)
-                                elif error_type == 'invalid_subscription':
-                                    self.logger.info(f"🗑️ Removing invalid subscription for user {user.user_id}")
-                                    self.subscription_manager.remove_subscription(user.user_id)
-                                else:
-                                    self.logger.warning(f"⚠️ Failed to notify user {user.user_id}")
-                                    self.subscription_manager.increment_failed_attempts(user.user_id)
-
-                                    if user.failed_attempts >= 3:
-                                        self.logger.info(
-                                            f"🗑️ Removing subscription after 3 failed attempts: {user.user_id}")
-                                        self.subscription_manager.remove_subscription(user.user_id)
-
-                            self.last_seen_slots[key] = current_slots_set
-                        else:
-                            self.logger.info(f"ℹ️ No new slots for {location} (already seen all {len(slots)} slots)")
-                    else:
-                        self.logger.info(f"📭 No available slots for {location}")
-
-                except Exception as e:
-                    self.logger.error(f"❌ Error checking location {location}: {e}", exc_info=True)
+                # 🔥 При любой серьёзной ошибке - перезапускаем браузер
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"🔄 Restarting browser after error (attempt {attempt + 1})...")
+                    try:
+                        await self.scraper.restart_browser()
+                        await asyncio.sleep(10)  # Даём браузеру время восстановиться
+                    except Exception as restart_error:
+                        self.logger.error(f"💥 Failed to restart browser: {restart_error}")
+                        # Если даже перезапуск не помог - ждём дольше
+                        await asyncio.sleep(30)
                     continue
+                else:
+                    self.logger.error(f"❌ All {max_retries} attempts failed for category {category_key}")
+                    return False
 
-            self.logger.info(f"✅ Finished checking category {category_key}, saving results...")
-            self._save_current_availability()
-            return True
-
-        except Exception as e:
-            self.logger.error(f"❌ Error monitoring category {category_key}: {e}", exc_info=True)
-            return False
+        return False
 
     async def run(self):
         """Main monitoring loop with browser restarts"""

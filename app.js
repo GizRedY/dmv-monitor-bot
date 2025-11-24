@@ -236,6 +236,7 @@ async function subscribe() {
     hideInlineError();
 
     try {
+        // 1. Проверка: выбраны ли категории
         if (state.selectedCategories.length === 0) {
             showInlineError('Please select at least one category.');
             btn.disabled = false;
@@ -243,6 +244,7 @@ async function subscribe() {
             return;
         }
 
+        // 2. Разрешение на уведомления
         const permission = await requestNotificationPermission();
         if (!permission.granted) {
             showInlineError(permission.error || 'Notifications are required.');
@@ -251,23 +253,58 @@ async function subscribe() {
             return;
         }
 
-        // Register service worker
+        // 3. Регистрация service worker и push-подписка
         let pushSubscription = null;
 
         if ('serviceWorker' in navigator && 'PushManager' in window) {
-            const reg = await navigator.serviceWorker.register('/sw.js');
-            await navigator.serviceWorker.ready;
+            try {
+                const reg = await navigator.serviceWorker.register('/sw.js');
+                await navigator.serviceWorker.ready;
 
-            const vapidKey = await getVapidPublicKey();
+                // Проверяем существующую подписку
+                let existingSub = await reg.pushManager.getSubscription();
 
-            pushSubscription = await reg.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(vapidKey)
-            });
+                if (existingSub) {
+                    console.log('Using existing push subscription');
+                    pushSubscription = existingSub;
+                } else {
+                    const vapidKey = await getVapidPublicKey();
 
-            state.subscription = pushSubscription;
+                    try {
+                        pushSubscription = await reg.pushManager.subscribe({
+                            userVisibleOnly: true,
+                            applicationServerKey: urlBase64ToUint8Array(vapidKey)
+                        });
+                        console.log('Created new push subscription');
+                    } catch (subError) {
+                        console.error('Push subscription error:', subError);
+
+                        // Классика: юзер запретил уведомления
+                        if (subError.name === 'NotAllowedError') {
+                            throw new Error('Notifications blocked. Please allow notifications in browser settings.');
+                        }
+                        // Браузер вообще не поддерживает push
+                        else if (subError.name === 'NotSupportedError') {
+                            throw new Error('Push notifications not supported in this browser. Try Chrome, Firefox, or Edge (latest).');
+                        }
+                        // Любая другая ошибка (в т.ч. странности Edge)
+                        else {
+                            console.warn('Push subscription failed, continuing without it:', subError.message);
+                            pushSubscription = null; // фолбэк: работаем без push
+                        }
+                    }
+                }
+
+                state.subscription = pushSubscription;
+            } catch (swError) {
+                console.error('Service Worker error:', swError);
+                throw new Error('Failed to register service worker: ' + swError.message);
+            }
+        } else {
+            console.warn('Service worker or PushManager not supported in this browser');
         }
 
+        // 4. userId и отправка на бэкенд
         state.userId = pushSubscription
             ? btoa(pushSubscription.endpoint).substring(0, 50)
             : 'user_' + Date.now();
@@ -291,7 +328,7 @@ async function subscribe() {
 
     } catch (err) {
         console.error('Subscribe error:', err);
-        showInlineError('Failed: ' + err.message);
+        showInlineError('Failed: ' + (err.message || 'Unknown error'));
     }
 
     btn.textContent = original;

@@ -658,7 +658,7 @@ class DMVScraper:
                 return False
 
             await self.page.wait_for_load_state("networkidle", timeout=40000)
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1)
 
             # Вторая кнопка "Make an Appointment" (если есть)
             second_make = self.page.locator("input.next-button[value='Make an Appointment']")
@@ -666,7 +666,7 @@ class DMVScraper:
                 if not await self.safe_click(second_make, "Second Make an Appointment button"):
                     self.logger.warning("⚠️ Could not click second button, continuing...")
                 await self.page.wait_for_load_state("networkidle", timeout=40000)
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(1)
 
             # OK button
             ok_btn = self.page.get_by_role("button", name=re.compile(r"^ok$", re.I))
@@ -675,7 +675,7 @@ class DMVScraper:
                 await asyncio.sleep(2)
 
             self.logger.info(f"🔍 Selecting category: {category_name}")
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1)
 
             # Поиск и клик на категорию
             candidates = [

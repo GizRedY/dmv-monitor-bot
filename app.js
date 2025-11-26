@@ -70,8 +70,22 @@ window.selectPlatform = selectPlatform;
 // ============================================================================
 
 async function requestNotificationPermission() {
+    // 🔧 НОВОЕ: Проверка поддержки уведомлений с понятными инструкциями
     if (!('Notification' in window)) {
-        return { granted: false, error: 'Browser does not support notifications' };
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        const isAndroid = /Android/.test(navigator.userAgent);
+
+        let errorMessage = '';
+
+        if (isIOS) {
+            errorMessage = '📱 iPhone/iPad detected!\n\n✅ REQUIRED STEPS:\n1. Open this site in Safari (not Chrome!)\n2. Tap Share button (⬆️)\n3. Select "Add to Home Screen"\n4. Open the app from Home Screen\n5. Try again\n\nNotifications only work from Home Screen app!';
+        } else if (isAndroid) {
+            errorMessage = '🤖 Android detected!\n\n✅ REQUIRED STEPS:\n1. Open this site in Chrome\n2. Tap menu (⋮) → "Add to Home screen"\n3. Open the installed app\n4. Try again\n\nNotifications only work from installed app!';
+        } else {
+            errorMessage = '💻 Desktop detected!\n\n✅ Please install this app first:\n• Chrome: Click install icon in address bar\n• Safari: Share → "Add to Dock"\n\nThen try again!';
+        }
+
+        return { granted: false, error: errorMessage };
     }
 
     if (Notification.permission === 'granted') {
@@ -83,7 +97,7 @@ async function requestNotificationPermission() {
         return { granted: permission === 'granted' };
     }
 
-    return { granted: false, error: 'Notifications are blocked in settings.' };
+    return { granted: false, error: 'Notifications are blocked in browser settings. Please enable them and try again.' };
 }
 
 // ============================================================================
@@ -239,6 +253,27 @@ async function subscribe() {
         // 1. Проверка: выбраны ли категории
         if (state.selectedCategories.length === 0) {
             showInlineError('Please select at least one category.');
+            btn.disabled = false;
+            btn.textContent = original;
+            return;
+        }
+
+        // 1.5. 🔧 НОВОЕ: Проверка поддержки Service Worker и Push
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            const isAndroid = /Android/.test(navigator.userAgent);
+
+            let errorMessage = '';
+
+            if (isIOS) {
+                errorMessage = '📱 iPhone/iPad: You MUST use Safari and add this site to Home Screen first! Tap Share (⬆️) → "Add to Home Screen" → Open app → Try again.';
+            } else if (isAndroid) {
+                errorMessage = '🤖 Android: You MUST use Chrome and install this app first! Tap menu (⋮) → "Add to Home screen" → Open app → Try again.';
+            } else {
+                errorMessage = '💻 Desktop: Please install this app first! Chrome: Click install icon. Safari: Share → "Add to Dock". Then try again.';
+            }
+
+            showInlineError(errorMessage);
             btn.disabled = false;
             btn.textContent = original;
             return;

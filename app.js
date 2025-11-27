@@ -577,17 +577,28 @@ function renderAvailabilityList(categoryKey) {
             }
         }
 
-        const slotsCount = typeof item.slots_count === 'number' ? item.slots_count : 0;
-        const slotsLabel = slotsCount > 0 ? `${slotsCount} slots` : 'No slots';
-        const slotsExtraClass = slotsCount > 0 ? '' : ' availability-slots-empty';
+// Определяем статус локации
+        let statusLabel = '';
+        let statusClass = '';
+
+        // 🔥 ПРОСТАЯ ЛОГИКА: только Available или Not available
+        const isAvailable = item.available === true || item.available === 'true';
+
+        if (isAvailable) {
+            statusLabel = 'Available';
+            statusClass = ' availability-slots-available';
+        } else {
+            statusLabel = 'No slots';
+            statusClass = ' availability-slots-unavailable';
+        }
 
         row.innerHTML = `
             <div class="availability-main">
                 <div class="availability-location">${item.location_name}</div>
                 <div class="availability-meta">Last checked: ${lastCheckedText}</div>
             </div>
-            <div class="availability-slots${slotsExtraClass}">
-                ${slotsLabel}
+            <div class="availability-slots${statusClass}">
+                ${statusLabel}
             </div>
         `;
 

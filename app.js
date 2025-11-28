@@ -245,6 +245,13 @@ async function subscribe() {
     const btn = document.getElementById('subscribeBtn');
     const original = btn.textContent;
 
+    // 🔧 CRITICAL: Prevent multiple simultaneous subscription attempts
+    if (btn.dataset.subscribing === 'true') {
+        console.warn('Subscription already in progress, ignoring duplicate request');
+        return;
+    }
+
+    btn.dataset.subscribing = 'true';
     btn.disabled = true;
     btn.textContent = '⏳ Setting up...';
     hideInlineError();
@@ -293,11 +300,27 @@ async function subscribe() {
 
         if ('serviceWorker' in navigator && 'PushManager' in window) {
             try {
-                const reg = await navigator.serviceWorker.register('/sw.js');
-                await navigator.serviceWorker.ready;
+                // 🔧 CRITICAL FIX: Ensure SW is properly registered and activated
+                let reg = await navigator.serviceWorker.getRegistration('/');
+
+                if (!reg) {
+                    console.log('No existing registration, creating new one...');
+                    reg = await navigator.serviceWorker.register('/sw.js');
+                }
+
+                // Wait for SW to be ready (active)
+                console.log('Waiting for service worker to be ready...');
+                const readyReg = await navigator.serviceWorker.ready;
+                console.log('Service worker is ready, state:', readyReg.active?.state);
+
+                // Extra safety: wait a bit if SW just activated
+                if (readyReg.active?.state === 'activating') {
+                    console.log('SW still activating, waiting...');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
 
                 // Проверяем существующую подписку
-                let existingSub = await reg.pushManager.getSubscription();
+                let existingSub = await readyReg.pushManager.getSubscription();
 
                 if (existingSub) {
                     console.log('Using existing push subscription');
@@ -346,17 +369,50 @@ async function subscribe() {
 
         localStorage.setItem('dmv_user_id', state.userId);
 
-        await fetch(`${API_URL}/subscriptions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                user_id: state.userId,
-                push_subscription: pushSubscription ? JSON.stringify(pushSubscription.toJSON()) : null,
-                categories: state.selectedCategories,
-                locations: state.selectedLocations,
-                date_range_days: 30
-            })
-        });
+        // 🔧 IMPROVED: Add retry logic for API call
+        let subscriptionCreated = false;
+        let lastError = null;
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                console.log(`API subscription attempt ${attempt}/3...`);
+
+                const response = await fetch(`${API_URL}/subscriptions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: state.userId,
+                        push_subscription: pushSubscription ? JSON.stringify(pushSubscription.toJSON()) : null,
+                        categories: state.selectedCategories,
+                        locations: state.selectedLocations,
+                        date_range_days: 30
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server error (${response.status}): ${errorText}`);
+                }
+
+                const result = await response.json();
+                console.log('✅ Subscription created successfully:', result);
+                subscriptionCreated = true;
+                break;
+
+            } catch (apiError) {
+                lastError = apiError;
+                console.error(`❌ API attempt ${attempt} failed:`, apiError);
+
+                if (attempt < 3) {
+                    console.log('Retrying in 1 second...');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+        }
+
+        if (!subscriptionCreated) {
+            throw new Error(`Failed to create subscription after 3 attempts: ${lastError?.message || 'Unknown error'}`);
+        }
 
         showSuccessScreen();
         showDonatePopup();
@@ -364,10 +420,12 @@ async function subscribe() {
     } catch (err) {
         console.error('Subscribe error:', err);
         showInlineError('Failed: ' + (err.message || 'Unknown error'));
+    } finally {
+        // 🔧 CRITICAL: Always reset the subscribing flag
+        btn.dataset.subscribing = 'false';
+        btn.textContent = original;
+        btn.disabled = false;
     }
-
-    btn.textContent = original;
-    btn.disabled = false;
 }
 
 window.subscribe = subscribe;
@@ -493,12 +551,25 @@ function urlBase64ToUint8Array(str) {
 async function restoreExistingSubscription() {
     try {
         const savedUserId = localStorage.getItem('dmv_user_id');
-        if (!savedUserId) return false;
+        if (!savedUserId) {
+            console.log('No saved user ID found');
+            return false;
+        }
+
+        console.log('Checking for existing subscription:', savedUserId);
 
         const resp = await fetch(`${API_URL}/subscriptions/${encodeURIComponent(savedUserId)}`);
-        if (!resp.ok) return false;
+
+        if (!resp.ok) {
+            if (resp.status === 404) {
+                console.log('No active subscription found on server, clearing local storage');
+                localStorage.removeItem('dmv_user_id');
+            }
+            return false;
+        }
 
         const subData = await resp.json();
+        console.log('✅ Found existing subscription:', subData);
 
         state.userId = savedUserId;
         state.selectedCategories = subData.categories || [];
@@ -511,6 +582,8 @@ async function restoreExistingSubscription() {
 
     } catch (err) {
         console.error('Restore error:', err);
+        // Clear potentially corrupted data
+        localStorage.removeItem('dmv_user_id');
         return false;
     }
 }
@@ -883,10 +956,20 @@ window.filterLocations = filterLocations;
 console.log('All window functions defined successfully');
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('='.repeat(60));
+    console.log('DMV Monitor - Frontend Initialization');
+    console.log('='.repeat(60));
     console.log('DOM loaded, initializing app...');
+    console.log('User Agent:', navigator.userAgent);
+    console.log('Service Worker support:', 'serviceWorker' in navigator);
+    console.log('Push Manager support:', 'PushManager' in window);
+    console.log('Notification support:', 'Notification' in window);
+    console.log('Current permission:', Notification?.permission);
 
     // Restore existing subscription
-    restoreExistingSubscription();
+    restoreExistingSubscription().then(restored => {
+        console.log('Subscription restore result:', restored);
+    });
 
     // Load availability data immediately
     updateAvailabilityData();
@@ -894,5 +977,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Start auto-update every 10 seconds
     availabilityUpdateInterval = setInterval(updateAvailabilityData, 10000);
 
-    console.log('App initialized successfully');
+    console.log('✅ App initialized successfully');
+    console.log('='.repeat(60));
 });

@@ -15,6 +15,7 @@ import logging
 from pywebpush import webpush, WebPushException
 import os
 from datetime import datetime, timedelta
+import fcntl
 
 app = FastAPI(title="DMV Monitor API", version="2.0.0")
 logger = logging.getLogger("API")
@@ -42,7 +43,7 @@ VAPID_CLAIMS = {
     "sub": "mailto:activation.service.mailbox@gmail.com"
 }
 
-# DMV Categories - copied here to avoid circular import
+# DMV Categories
 DMV_CATEGORIES = {
     "driver_license_first_time": {
         "name": "Driver License - First Time",
@@ -118,7 +119,7 @@ class PushSubscriptionInfo(BaseModel):
 class SubscriptionRequest(BaseModel):
     """Request to create/update subscription"""
     user_id: str
-    push_subscription: Optional[str] = None  # JSON string of push subscription
+    push_subscription: Optional[str] = None
     categories: List[str] = []
     locations: List[str] = []
     date_range_days: int = 30
@@ -159,7 +160,6 @@ class AvailabilityItem(BaseModel):
     last_checked: str
 
 
-
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -168,8 +168,17 @@ def load_subscriptions() -> dict:
     """Load subscriptions from file"""
     try:
         if SUBSCRIPTIONS_FILE.exists():
-            with open(SUBSCRIPTIONS_FILE, 'r') as f:
-                return {sub['user_id']: sub for sub in json.load(f)}
+            # 🔒 Lock before reading
+            lock_path = DATA_DIR / "subscriptions.lock"
+
+            with open(lock_path, 'w') as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                try:
+                    with open(SUBSCRIPTIONS_FILE, 'r') as f:
+                        return {sub['user_id']: sub for sub in json.load(f)}
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
         return {}
     except Exception as e:
         logger.error(f"Error loading subscriptions: {e}")
@@ -177,15 +186,33 @@ def load_subscriptions() -> dict:
 
 
 def save_subscriptions(subscriptions: dict):
-    """Save subscriptions to file"""
+    """Save subscriptions to file (atomic write with file lock)"""
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        with open(SUBSCRIPTIONS_FILE, 'w') as f:
-            json.dump(list(subscriptions.values()), f, indent=2)
+
+        # 🔒 Lock file BEFORE any operations
+        lock_path = DATA_DIR / "subscriptions.lock"
+
+        with open(lock_path, 'w') as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+            try:
+                data = list(subscriptions.values())
+
+                tmp_path = SUBSCRIPTIONS_FILE.with_suffix(SUBSCRIPTIONS_FILE.suffix + ".tmp")
+
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+
+                os.replace(tmp_path, SUBSCRIPTIONS_FILE)
+
+                logger.info(f"✅ Saved {len(subscriptions)} subscriptions (locked)")
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
     except Exception as e:
         logger.error(f"Error saving subscriptions: {e}")
         raise HTTPException(status_code=500, detail="Failed to save subscription")
-
 
 
 def load_availability() -> list:
@@ -200,7 +227,6 @@ def load_availability() -> list:
         if isinstance(data, list):
             return data
 
-        # For backward compatibility if format changes
         return list(data.values())
     except Exception as e:
         logger.error(f"Error loading availability: {e}")
@@ -225,7 +251,6 @@ def send_push_notification(subscription_info: dict, title: str, body: str, url: 
         elif 'mozilla.com' in endpoint:
             aud = 'https://updates.push.services.mozilla.com'
         else:
-            # Extract origin from endpoint
             from urllib.parse import urlparse
             parsed = urlparse(endpoint)
             aud = f"{parsed.scheme}://{parsed.netloc}"
@@ -306,7 +331,6 @@ async def serve_manifest():
     return HTMLResponse("manifest.json not found", status_code=404)
 
 
-# Icon files (you'll need to create these)
 @app.get("/icon-192.png")
 async def serve_icon_192():
     """Serve 192x192 icon"""
@@ -364,7 +388,6 @@ async def get_status():
     """Get service status"""
     subscriptions = load_subscriptions()
 
-    # Get unique categories from all subscriptions
     categories = set()
     for sub in subscriptions.values():
         categories.update(sub.get('categories', []))
@@ -389,7 +412,6 @@ async def get_categories():
     ]
 
 
-
 @app.get("/availability", response_model=List[AvailabilityItem])
 async def get_availability():
     """Get current appointment availability snapshot for UI"""
@@ -400,47 +422,67 @@ async def get_availability():
         try:
             items.append(AvailabilityItem(**item))
         except Exception:
-            # Skip invalid records
             continue
 
-    # Sort by location name for stable display
     items.sort(key=lambda x: (x.location_name.lower(), x.category))
     return items
+
 
 @app.post("/subscriptions", response_model=SubscriptionResponse)
 async def create_subscription(subscription: SubscriptionRequest):
     """Create or update a subscription"""
-    # Load existing subscriptions
-    subscriptions = load_subscriptions()
+    try:
+        # 🔧 VALIDATION: Check required fields
+        if not subscription.user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
 
-    # Get existing created_at or set new one
-    created_at = datetime.now().isoformat()
-    if subscription.user_id in subscriptions:
-        created_at = subscriptions[subscription.user_id].get('created_at', created_at)
+        if not subscription.categories:
+            raise HTTPException(status_code=400, detail="At least one category is required")
 
-    # Create/update subscription
-    subscriptions[subscription.user_id] = {
-        'user_id': subscription.user_id,
-        'push_subscription': subscription.push_subscription,
-        'categories': subscription.categories,
-        'locations': subscription.locations,
-        'date_range_days': subscription.date_range_days,
-        'created_at': created_at,
-        'last_notification_sent': subscriptions.get(subscription.user_id, {}).get('last_notification_sent')
-    }
+        # Load existing subscriptions
+        subscriptions = load_subscriptions()
 
-    # Save
-    save_subscriptions(subscriptions)
+        # Get existing created_at or set new one
+        created_at = datetime.now().isoformat()
+        if subscription.user_id in subscriptions:
+            created_at = subscriptions[subscription.user_id].get('created_at', created_at)
+            logger.info(f"📝 Updating existing subscription for user: {subscription.user_id}")
+        else:
+            logger.info(f"✨ Creating new subscription for user: {subscription.user_id}")
 
-    logger.info(f"Subscription created/updated for user: {subscription.user_id}")
+        # Create/update subscription
+        subscriptions[subscription.user_id] = {
+            'user_id': subscription.user_id,
+            'push_subscription': subscription.push_subscription,
+            'categories': subscription.categories,
+            'locations': subscription.locations,
+            'date_range_days': subscription.date_range_days,
+            'created_at': created_at,
+            'last_notification_sent': subscriptions.get(subscription.user_id, {}).get('last_notification_sent')
+        }
 
-    return SubscriptionResponse(
-        user_id=subscription.user_id,
-        categories=subscription.categories,
-        locations=subscription.locations,
-        date_range_days=subscription.date_range_days,
-        created_at=created_at
-    )
+        # Save with error handling
+        try:
+            save_subscriptions(subscriptions)
+            logger.info(f"✅ Subscription saved successfully for user: {subscription.user_id}")
+            logger.info(f"📊 Total subscriptions: {len(subscriptions)}")
+        except Exception as e:
+            logger.error(f"❌ Failed to save subscription: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to save subscription: {str(e)}")
+
+        return SubscriptionResponse(
+            user_id=subscription.user_id,
+            categories=subscription.categories,
+            locations=subscription.locations,
+            date_range_days=subscription.date_range_days,
+            created_at=created_at
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in create_subscription: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/subscriptions/{user_id}", response_model=SubscriptionResponse)

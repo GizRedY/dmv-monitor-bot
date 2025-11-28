@@ -14,6 +14,7 @@ import time
 import re
 import sys
 import os
+import fcntl
 
 try:
     from playwright.async_api import async_playwright, Page, Browser
@@ -263,8 +264,97 @@ class NotificationService:
         self.config = config
         self.logger = logging.getLogger("NotificationService")
 
+    # 🔧 УЛУЧШЕНИЕ: NotificationService с более детальным логированием
+    # Заменить метод send_push_notification в классе NotificationService (строки ~286-338)
+
     def send_push_notification(self, subscription: UserSubscription, title: str, body: str, url: str = "/") -> tuple[
         bool, Optional[str]]:
+        """Send browser push notification with improved error handling"""
+        try:
+            if not subscription.push_subscription:
+                self.logger.warning(f"No push subscription for user {subscription.user_id}")
+                return False, 'no_subscription'
+
+            push_sub = json.loads(subscription.push_subscription)
+            endpoint = push_sub.get('endpoint', '')
+
+            # Determine audience based on endpoint
+            if 'apple.com' in endpoint:
+                aud = 'https://web.push.apple.com'
+            elif 'fcm.googleapis.com' in endpoint:
+                aud = 'https://fcm.googleapis.com'
+            elif 'mozilla.com' in endpoint:
+                aud = 'https://updates.push.services.mozilla.com'
+            else:
+                from urllib.parse import urlparse
+                parsed = urlparse(endpoint)
+                aud = f"{parsed.scheme}://{parsed.netloc}"
+
+            vapid_claims = {
+                "sub": "mailto:activation.service.mailbox@gmail.com",
+                "aud": aud
+            }
+
+            notification_data = {
+                "title": title,
+                "body": body,
+                "icon": "/icon-192.png",
+                "badge": "/icon-192.png",
+                "tag": "dmv-appointment",
+                "requireInteraction": True,
+                "data": {
+                    "url": url
+                }
+            }
+
+            # 🔥 НОВОЕ: Детальное логирование перед отправкой
+            self.logger.info(f"📤 Attempting push to user {subscription.user_id}, endpoint: {endpoint[:50]}...")
+
+            webpush(
+                subscription_info=push_sub,
+                data=json.dumps(notification_data),
+                vapid_private_key=self.config.vapid_private_key,
+                vapid_claims=vapid_claims
+            )
+
+            self.logger.info(f"✅ Push notification sent successfully to user {subscription.user_id}")
+            return True, None
+
+        except WebPushException as e:
+            # 🔥 УЛУЧШЕНО: Более детальное логирование ошибок
+            self.logger.error(f"❌ WebPush error for user {subscription.user_id}: {e}")
+
+            if e.response:
+                status_code = e.response.status_code
+                self.logger.error(f"   Status code: {status_code}, Response: {e.response.text[:200]}")
+
+                # Только 404/410 = реально мёртвая подписка
+                if status_code in [404, 410]:
+                    self.logger.warning(f"💀 Subscription truly dead (404/410) for user {subscription.user_id}")
+                    return False, 'invalid_subscription'
+
+                # 400 = плохой запрос (возможно, временная проблема)
+                elif status_code == 400:
+                    self.logger.warning(f"⚠️ Bad request (400) for user {subscription.user_id} - may be temporary")
+                    return False, 'bad_request'
+
+                # 401/403 = проблемы с авторизацией
+                elif status_code in [401, 403]:
+                    self.logger.warning(f"🔒 Auth error ({status_code}) for user {subscription.user_id}")
+                    return False, 'auth_error'
+
+                # Любые другие коды
+                else:
+                    self.logger.warning(f"❓ Unknown error code {status_code} for user {subscription.user_id}")
+                    return False, 'unknown_error'
+            else:
+                self.logger.error(f"❌ WebPush exception without response for user {subscription.user_id}")
+                return False, 'network_error'
+
+        except Exception as e:
+            self.logger.error(f"💥 Unexpected error sending push notification to {subscription.user_id}: {e}",
+                              exc_info=True)
+            return False, 'exception'
         """Send browser push notification"""
         try:
             if not subscription.push_subscription:
@@ -365,10 +455,16 @@ class SubscriptionManager:
             self.logger.warning(f"Failed attempts for {user_id}: {self.subscriptions[user_id].failed_attempts}")
 
     def reset_failed_attempts(self, user_id: str):
-        """Reset failed attempts counter after successful notification"""
+        """Reset failed attempts counter after successful notification - with merge protection"""
+        # 🔥 НОВОЕ: Перезагружаем подписки перед обновлением
+        self.load_subscriptions()
+
         if user_id in self.subscriptions:
             self.subscriptions[user_id].failed_attempts = 0
             self.save_subscriptions()
+            self.logger.debug(f"✅ Reset failed attempts for {user_id}")
+        else:
+            self.logger.warning(f"⚠️ User {user_id} not found when resetting failed attempts")
 
     def load_subscriptions(self):
         """Load subscriptions from file"""
@@ -379,8 +475,17 @@ class SubscriptionManager:
                 self.logger.info("No subscriptions file found")
                 return
 
-            with open(self.config.subscriptions_file, 'r') as f:
-                data = json.load(f)
+            # 🔒 Lock before reading
+            lock_path = self.config.data_dir / "subscriptions.lock"
+
+            with open(lock_path, 'w') as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                try:
+                    with open(self.config.subscriptions_file, 'r') as f:
+                        data = json.load(f)
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
             loaded_count = 0
 
@@ -416,29 +521,52 @@ class SubscriptionManager:
             self.logger.error(f"Error loading subscriptions: {e}")
 
     def save_subscriptions(self):
-        """Save subscriptions to file (atomic write)"""
+        """Save subscriptions to file (atomic write with file lock)"""
         try:
-            # Гарантируем, что папка существует
             self.config.data_dir.mkdir(parents=True, exist_ok=True)
 
-            # Данные для записи — как и раньше: список словарей
-            data = [sub.to_dict() for sub in self.subscriptions.values()]
+            # 🔥 КРИТИЧНО: Lock file BEFORE any operations
+            lock_path = self.config.data_dir / "subscriptions.lock"
 
-            # Временный файл рядом с основным
-            tmp_path = self.config.subscriptions_file.with_suffix(
-                self.config.subscriptions_file.suffix + ".tmp"
-            )
+            with open(lock_path, 'w') as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
-            # 1) Пишем во временный файл
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+                try:
+                    # 🔥 НОВОЕ: Перезагружаем данные из файла перед сохранением
+                    # чтобы не потерять подписки, добавленные через API
+                    existing_data = {}
+                    if self.config.subscriptions_file.exists():
+                        try:
+                            with open(self.config.subscriptions_file, 'r') as f:
+                                file_subs = json.load(f)
+                                for sub_data in file_subs:
+                                    existing_data[sub_data['user_id']] = sub_data
+                            self.logger.debug(f"📖 Loaded {len(existing_data)} existing subscriptions from file")
+                        except Exception as e:
+                            self.logger.warning(f"⚠️ Could not load existing subscriptions: {e}")
 
-            # 2) Атомарно заменяем старый файл новым
-            os.replace(tmp_path, self.config.subscriptions_file)
+                    # 🔥 НОВОЕ: Мёрджим наши изменения с тем, что в файле
+                    # Приоритет у данных из памяти (self.subscriptions)
+                    for user_id, sub in self.subscriptions.items():
+                        existing_data[user_id] = sub.to_dict()
 
-            self.logger.debug(f"Saved {len(self.subscriptions)} subscriptions (atomic)")
+                    data = list(existing_data.values())
+
+                    # Атомарная запись через временный файл
+                    tmp_path = self.config.subscriptions_file.with_suffix(
+                        self.config.subscriptions_file.suffix + ".tmp"
+                    )
+
+                    with open(tmp_path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+
+                    os.replace(tmp_path, self.config.subscriptions_file)
+
+                    self.logger.debug(f"✅ Saved {len(data)} subscriptions (locked, merged)")
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
         except Exception as e:
-            # ВАЖНО: если что-то пошло не так, старый subscriptions.json останется нетронутым
             self.logger.error(f"Error saving subscriptions: {e}", exc_info=True)
 
     def remove_subscription(self, user_id: str):
@@ -465,10 +593,28 @@ class SubscriptionManager:
         return len(removed)
 
     def update_last_notification(self, user_id: str):
-        """Update last notification timestamp"""
+        """Update last notification timestamp - with merge protection"""
+        # 🔥 НОВОЕ: Перезагружаем подписки перед обновлением
+        self.load_subscriptions()
+
         if user_id in self.subscriptions:
             self.subscriptions[user_id].last_notification_sent = datetime.now()
             self.save_subscriptions()
+            self.logger.debug(f"📝 Updated last notification for {user_id}")
+        else:
+            self.logger.warning(f"⚠️ User {user_id} not found when updating notification timestamp")
+
+    def increment_failed_attempts(self, user_id: str):
+        """Increment failed notification attempts counter - with merge protection"""
+        # 🔥 НОВОЕ: Перезагружаем подписки перед обновлением
+        self.load_subscriptions()
+
+        if user_id in self.subscriptions:
+            self.subscriptions[user_id].failed_attempts += 1
+            self.save_subscriptions()
+            self.logger.warning(f"Failed attempts for {user_id}: {self.subscriptions[user_id].failed_attempts}")
+        else:
+            self.logger.warning(f"⚠️ User {user_id} not found when incrementing failed attempts")
 
     def get_interested_users(self, category: str, location: str) -> List[UserSubscription]:
         """Get users interested in this category/location combination"""
@@ -1022,18 +1168,14 @@ class DMVScraper:
 
             await asyncio.sleep(2)
 
-            # Go back - ULTRA IMPROVED VERSION WITH PAGE VERIFICATION
+            # Go back to location list
             try:
                 page_type = await self.get_current_page_type()
 
                 if page_type == 'appointment_page':
                     self.logger.info("Going back from appointment page")
-                    back_btn = self.page.locator('button:has-text("Back")').first
-                    if await back_btn.is_visible():
-                        await self.safe_click(back_btn, "Back button")
-                    else:
-                        self.logger.info("Back button not visible, using browser back")
-                        await self.page.go_back()
+                    # 🔥 УПРОЩЕНО: Сразу используем browser back, без попытки найти кнопку
+                    await self.page.go_back()
 
                     await asyncio.sleep(2)
                     try:
@@ -1042,9 +1184,9 @@ class DMVScraper:
                         # Verify we returned to location list
                         final_page_type = await self.get_current_page_type()
                         if final_page_type == 'location_list':
-                            self.logger.info("Successfully returned to location list")
+                            self.logger.info("✅ Successfully returned to location list")
                         else:
-                            self.logger.warning(f"After going back, page type is: {final_page_type}")
+                            self.logger.warning(f"⚠️ After going back, page type is: {final_page_type}")
                             if final_page_type != 'location_list':
                                 await self.page.go_back()
                                 await asyncio.sleep(2)
@@ -1260,6 +1402,9 @@ class DMVMonitorService:
 
                                 self.logger.info(f"👥 Found {len(interested_users)} interested users")
 
+                                # 🔧 ИСПРАВЛЕНИЕ: Заменить блок обработки уведомлений в dmv_monitor.py
+                                # Найти строки ~946-960 и заменить на этот код:
+
                                 for user in interested_users:
                                     success, error_type = self.notification_service.notify_user(user, availability)
 
@@ -1267,16 +1412,28 @@ class DMVMonitorService:
                                         self.logger.info(f"✅ Successfully notified user {user.user_id}")
                                         self.subscription_manager.update_last_notification(user.user_id)
                                         self.subscription_manager.reset_failed_attempts(user.user_id)
+
                                     elif error_type == 'invalid_subscription':
-                                        self.logger.info(f"🗑️ Removing invalid subscription for user {user.user_id}")
-                                        self.subscription_manager.remove_subscription(user.user_id)
-                                    else:
-                                        self.logger.warning(f"⚠️ Failed to notify user {user.user_id}")
+                                        # 🔥 КРИТИЧНО: Не удаляем сразу! Даём 3 попытки на все ошибки
+                                        self.logger.warning(
+                                            f"⚠️ Invalid subscription for user {user.user_id}, incrementing failed attempts")
                                         self.subscription_manager.increment_failed_attempts(user.user_id)
 
-                                        if user.failed_attempts >= 3:
+                                        # Удаляем только после 5 неудачных попыток (было 3)
+                                        if user.failed_attempts >= 5:
                                             self.logger.info(
-                                                f"🗑️ Removing subscription after 3 failed attempts: {user.user_id}")
+                                                f"🗑️ Removing subscription after {user.failed_attempts} failed attempts: {user.user_id}")
+                                            self.subscription_manager.remove_subscription(user.user_id)
+
+                                    else:
+                                        # Любая другая ошибка - тоже инкрементируем счётчик
+                                        self.logger.warning(f"⚠️ Failed to notify user {user.user_id}: {error_type}")
+                                        self.subscription_manager.increment_failed_attempts(user.user_id)
+
+                                        # Удаляем только после 5 неудачных попыток
+                                        if user.failed_attempts >= 5:
+                                            self.logger.info(
+                                                f"🗑️ Removing subscription after {user.failed_attempts} failed attempts: {user.user_id}")
                                             self.subscription_manager.remove_subscription(user.user_id)
 
                                 self.last_seen_slots[key] = current_slots_set

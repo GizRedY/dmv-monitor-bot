@@ -67,8 +67,8 @@ class Config:
 
     # Browser settings - 🔧 КРИТИЧЕСКИ ВАЖНО ДЛЯ СТАБИЛЬНОСТИ
     headless: bool = True
-    page_timeout: int = 30000
-    navigation_timeout: int = 45000
+    page_timeout: int = 45000
+    navigation_timeout: int = 55000
 
     # 🔧 НОВОЕ: Перезапуск браузера после N категорий
     browser_restart_after_categories: int = 3
@@ -88,7 +88,7 @@ class Config:
 
     # Logging
     log_file: Path = Path("./logs/dmv_monitor.log")
-    log_level: str = "INFO"  # 🔧 Изменено на INFO /  WARNING для лучшей диагностики
+    log_level: str = "WARNING"  # 🔧 Изменено на INFO /  WARNING для лучшей диагностики
 
     # VAPID keys
     vapid_private_key: str = "9stDm8G4-lI5xMFXLSQDiAWL0dIelrKAImhagQw2Gj0"
@@ -846,8 +846,8 @@ class DMVScraper:
         """Безопасный клик с повторными попытками"""
         for attempt in range(max_retries):
             try:
-                if await self.wait_for_element_ready(locator, timeout=15000):  # Увеличил до 15 сек
-                    await locator.click(timeout=10000)  # Увеличил таймаут клика до 10 сек
+                if await self.wait_for_element_ready(locator, timeout=20000):  # Увеличил до 15 сек
+                    await locator.click(timeout=15000)  # Увеличил таймаут клика до 10 сек
                     self.logger.info(f"✅ Successfully clicked on {element_name}")
                     return True
                 else:
@@ -855,7 +855,7 @@ class DMVScraper:
             except Exception as e:
                 self.logger.warning(f"⚠️ Attempt {attempt + 1} to click {element_name} failed: {e}")
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(2)  # 🔥 Сократил паузу с 3 до 2 сек
+                    await asyncio.sleep(4)  # 🔥 Сократил паузу с 3 до 2 сек
 
         self.logger.error(f"❌ Failed to click on {element_name} after {max_retries} attempts")
         return False
@@ -1067,6 +1067,7 @@ class DMVScraper:
                                     if "sorry" not in text.lower():
                                         if await self.safe_click(element, f"Location: {location_name}"):
                                             clicked = True
+                                            await asyncio.sleep(3)
                                             # Wait for navigation after click
                                             try:
                                                 await self.page.wait_for_load_state("networkidle", timeout=15000)
@@ -1082,9 +1083,9 @@ class DMVScraper:
                 self.logger.warning(f"Could not click on location: {location_name}")
                 return slots
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
             try:
-                await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+                await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
             except:
                 pass
 
@@ -1166,7 +1167,7 @@ class DMVScraper:
 
             self.logger.info(f"✅ Found {len(slots)} slots for {location_name}")
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
 
             # Go back to location list
             try:

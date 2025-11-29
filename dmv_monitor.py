@@ -88,7 +88,7 @@ class Config:
 
     # Logging
     log_file: Path = Path("./logs/dmv_monitor.log")
-    log_level: str = "WARNING"  # 🔧 Изменено на INFO /  WARNING для лучшей диагностики
+    log_level: str = "INFO"  # 🔧 Изменено на INFO /  WARNING для лучшей диагностики
 
     # VAPID keys
     vapid_private_key: str = "9stDm8G4-lI5xMFXLSQDiAWL0dIelrKAImhagQw2Gj0"
@@ -842,12 +842,13 @@ class DMVScraper:
             self.logger.warning(f"⚠️ Element not ready: {e}")
             return False
 
-    async def safe_click(self, locator, element_name="element", max_retries=3):
-        """Безопасный клик с повторными попытками"""
+    async def safe_click(self, locator, element_name="element", timeout=8000, max_retries=2):
+        """Безопасный клик с повторными попытками и коротким таймаутом"""
         for attempt in range(max_retries):
             try:
-                if await self.wait_for_element_ready(locator, timeout=20000):  # Увеличил до 15 сек
-                    await locator.click(timeout=15000)  # Увеличил таймаут клика до 10 сек
+                # 🔥 Shorter timeout for element readiness check
+                if await self.wait_for_element_ready(locator, timeout=timeout):
+                    await locator.click(timeout=timeout)
                     self.logger.info(f"✅ Successfully clicked on {element_name}")
                     return True
                 else:
@@ -855,7 +856,7 @@ class DMVScraper:
             except Exception as e:
                 self.logger.warning(f"⚠️ Attempt {attempt + 1} to click {element_name} failed: {e}")
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(4)  # 🔥 Сократил паузу с 3 до 2 сек
+                    await asyncio.sleep(2)  # Reduced retry delay
 
         self.logger.error(f"❌ Failed to click on {element_name} after {max_retries} attempts")
         return False
@@ -1002,55 +1003,38 @@ class DMVScraper:
         slots = []
 
         try:
-            self.logger.info(f"Checking slots for: {location_name}")
+            self.logger.info(f"🔍 Checking slots for: {location_name}")
 
-            # CRITICAL: Make sure we are on location list page with smart recovery
+            # CRITICAL: Make sure we are on location list page
             max_recovery_attempts = 2
             for recovery_attempt in range(max_recovery_attempts):
                 page_check = await self.ensure_on_location_list()
 
                 if page_check:
-                    # ✅ Мы на правильной странице
                     self.logger.info(f"✅ Confirmed on location list page")
                     break
-
-                # ❌ Не на той странице - проверяем где мы
-                current_page_type = await self.get_current_page_type()
-                self.logger.warning(
-                    f"⚠️ Wrong page type: {current_page_type}, attempting recovery (attempt {recovery_attempt + 1}/{max_recovery_attempts})...")
-
-                if current_page_type == 'category_page':
-                    # Мы вернулись к выбору категорий - нужно заново войти в категорию!
-                    self.logger.info(
-                        f"🔄 Accidentally returned to category page, re-navigating to category {category_key}...")
-                    if await self.navigate_to_category(category_key):
-                        self.logger.info(f"✅ Successfully re-entered category {category_key}")
-                        continue
-                    else:
-                        self.logger.error(f"❌ Failed to re-enter category {category_key}")
-                        return slots
-
-                elif current_page_type == 'appointment_page':
-                    # Все еще на странице календаря - пытаемся вернуться
-                    self.logger.info(f"🔙 Still on appointment page, going back...")
-                    await self.page.go_back()
-                    await asyncio.sleep(2)
-
                 else:
-                    # Неизвестная страница - пробуем вернуться
-                    self.logger.warning(f"❓ Unknown page, attempting to go back...")
-                    await self.page.go_back()
-                    await asyncio.sleep(2)
+                    current_page_type = await self.get_current_page_type()
+                    self.logger.warning(
+                        f"⚠️ Wrong page type: {current_page_type}, recovery attempt {recovery_attempt + 1}")
+
+                    if current_page_type == 'category_page':
+                        if await self.navigate_to_category(category_key):
+                            continue
+                        else:
+                            return slots
+                    else:
+                        await self.page.go_back()
+                        await asyncio.sleep(2)
             else:
-                # Не получилось вернуться после всех попыток
-                self.logger.error(
-                    f"❌ Failed to return to location list after {max_recovery_attempts} attempts! Skipping {location_name}")
+                self.logger.error(f"❌ Failed to return to location list! Skipping {location_name}")
                 return slots
 
+            # 🔥 CLICK ON LOCATION
             clicked = False
             selectors = [
                 f"div:has-text('{location_name}')",
-                f".QFlowObjectItem:has-text('{location_name}')",
+                f".QflowObjectItem:has-text('{location_name}')",
             ]
 
             for selector in selectors:
@@ -1063,91 +1047,184 @@ class DMVScraper:
                             element = elements.nth(i)
                             if await element.is_visible():
                                 text = await element.inner_text()
-                                if location_name.lower() in text.lower():
-                                    if "sorry" not in text.lower():
-                                        if await self.safe_click(element, f"Location: {location_name}"):
-                                            clicked = True
-                                            await asyncio.sleep(3)
-                                            # Wait for navigation after click
-                                            try:
-                                                await self.page.wait_for_load_state("networkidle", timeout=15000)
-                                            except Exception as e:
-                                                self.logger.warning(f"Load state warning after clicking location: {e}")
-                                            break
+                                if location_name.lower() in text.lower() and "sorry" not in text.lower():
+                                    self.logger.info(f"🎯 Clicking on {location_name}...")
+                                    if await self.safe_click(element, f"Location: {location_name}"):
+                                        clicked = True
+                                        break
                         if clicked:
                             break
-                except Exception:
+                except Exception as e:
+                    self.logger.warning(f"Selector {selector} failed: {e}")
                     continue
 
             if not clicked:
-                self.logger.warning(f"Could not click on location: {location_name}")
+                self.logger.warning(f"❌ Could not click on location: {location_name}")
                 return slots
 
-            await asyncio.sleep(5)
-            try:
-                await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
-            except:
-                pass
+            # 🔥 КРИТИЧНО: Ждём появления календаря!
+            self.logger.info(f"⏳ Waiting for calendar to load for {location_name}...")
 
-            # Extract appointment data
+            calendar_loaded = False
+            try:
+                # Ждём либо календарь, либо селект с временем, либо сообщение об ошибке
+                await self.page.wait_for_function("""
+                    () => {
+                        // Проверяем наличие календаря
+                        const hasCalendar = document.querySelector('.ui-datepicker') !== null;
+
+                        // Проверяем наличие кликабельных дат
+                        const hasClickableDates = document.querySelectorAll('.ui-datepicker-calendar td[data-handler="selectDay"]').length > 0;
+
+                        // Проверяем наличие селекта с временем
+                        const timeSelects = document.querySelectorAll('select');
+                        let hasTimeSelect = false;
+                        for (const select of timeSelects) {
+                            if (select.options.length > 2) {
+                                hasTimeSelect = true;
+                                break;
+                            }
+                        }
+
+                        // Проверяем сообщение "нет доступных слотов"
+                        const bodyText = document.body.innerText.toLowerCase();
+                        const hasNoSlotsMessage = bodyText.includes('no available') || 
+                                                 bodyText.includes('sorry') ||
+                                                 bodyText.includes('not available');
+
+                        console.log('Calendar check:', {
+                            hasCalendar,
+                            hasClickableDates,
+                            hasTimeSelect,
+                            hasNoSlotsMessage
+                        });
+
+                        return hasCalendar || hasClickableDates || hasTimeSelect || hasNoSlotsMessage;
+                    }
+                """, timeout=30000)  # 30 секунд ждём
+
+                calendar_loaded = True
+                self.logger.info(f"✅ Calendar/booking page loaded for {location_name}")
+
+            except Exception as e:
+                self.logger.warning(f"⚠️ Timeout waiting for calendar for {location_name}: {e}")
+
+                # Проверим есть ли сообщение об ошибке
+                try:
+                    page_text = await self.page.evaluate("() => document.body.innerText.toLowerCase()")
+                    if 'sorry' in page_text or 'not available' in page_text:
+                        self.logger.info(f"ℹ️ Location {location_name} says no slots available")
+                        return slots
+                except:
+                    pass
+
+                self.logger.error(f"❌ Could not load calendar for {location_name}")
+                return slots
+
+            # Даём странице ещё немного времени
+            await asyncio.sleep(2)
+
+            # 🔥 EXTRACT APPOINTMENT DATA
+            self.logger.info(f"📊 Extracting appointment data for {location_name}...")
+
             appointment_data = await self.page.evaluate("""
                 () => {
-                    const results = [];
+                    const results = {
+                        currentMonth: null,
+                        currentYear: null,
+                        availableDays: [],
+                        timeSlots: []
+                    };
 
-                    let currentMonth = null;
-                    let currentYear = null;
+                    // Get month and year
+                    try {
+                        const monthEl = document.querySelector('.ui-datepicker-month');
+                        const yearEl = document.querySelector('.ui-datepicker-year');
 
-                    const monthEl = document.querySelector('.ui-datepicker-month, span.ui-datepicker-month');
-                    const yearEl = document.querySelector('.ui-datepicker-year, span.ui-datepicker-year');
-
-                    if (monthEl && yearEl) {
-                        const monthText = monthEl.textContent.trim().toLowerCase();
-                        const monthMap = {
-                            'january': 1, 'february': 2, 'march': 3, 'april': 4,
-                            'may': 5, 'june': 6, 'july': 7, 'august': 8,
-                            'september': 9, 'october': 10, 'november': 11, 'december': 12
-                        };
-                        currentMonth = monthMap[monthText];
-                        currentYear = parseInt(yearEl.textContent.trim());
-                    }
-
-                    if (!currentMonth || !currentYear) {
-                        const now = new Date();
-                        currentMonth = now.getMonth() + 1;
-                        currentYear = now.getFullYear();
-                    }
-
-                    const availableDays = [];
-                    const datepickerCells = document.querySelectorAll('.ui-datepicker-calendar td a:not(.ui-state-disabled)');
-                    for (const cell of datepickerCells) {
-                        const dayNum = parseInt(cell.textContent.trim());
-                        if (dayNum >= 1 && dayNum <= 31) {
-                            availableDays.push(dayNum);
+                        if (monthEl && yearEl) {
+                            const monthText = monthEl.textContent.trim().toLowerCase();
+                            const monthMap = {
+                                'january': 1, 'february': 2, 'march': 3, 'april': 4,
+                                'may': 5, 'june': 6, 'july': 7, 'august': 8,
+                                'september': 9, 'october': 10, 'november': 11, 'december': 12
+                            };
+                            results.currentMonth = monthMap[monthText];
+                            results.currentYear = parseInt(yearEl.textContent.trim());
                         }
+
+                        if (!results.currentMonth || !results.currentYear) {
+                            const now = new Date();
+                            results.currentMonth = now.getMonth() + 1;
+                            results.currentYear = now.getFullYear();
+                        }
+                    } catch (e) {
+                        console.error('Error parsing month/year:', e);
+                        const now = new Date();
+                        results.currentMonth = now.getMonth() + 1;
+                        results.currentYear = now.getFullYear();
                     }
 
-                    const timeSlots = [];
-                    const selects = document.querySelectorAll('select');
-                    for (const select of selects) {
-                        const options = Array.from(select.options);
-                        for (const opt of options) {
-                            if (opt.value && opt.value.trim() !== '' && !opt.disabled) {
-                                const text = opt.textContent.trim();
-                                if (/\\d{1,2}:\\d{2}\\s*(AM|PM)?/i.test(text)) {
-                                    timeSlots.push(text);
+                    // 🔥 Find available days - IMPROVED
+                    try {
+                        const clickableCells = document.querySelectorAll('.ui-datepicker-calendar td[data-handler="selectDay"]');
+
+                        console.log('🔍 Found clickable cells:', clickableCells.length);
+
+                        for (const cell of clickableCells) {
+                            if (!cell.classList.contains('ui-state-disabled') && 
+                                !cell.classList.contains('ui-datepicker-unselectable')) {
+
+                                const link = cell.querySelector('a');
+                                if (link) {
+                                    const dayNum = parseInt(link.textContent.trim());
+                                    if (dayNum >= 1 && dayNum <= 31) {
+                                        results.availableDays.push(dayNum);
+                                    }
                                 }
                             }
                         }
+
+                        results.availableDays = [...new Set(results.availableDays)].sort((a, b) => a - b);
+
+                        console.log('📅 Available days:', results.availableDays);
+                    } catch (e) {
+                        console.error('Error finding days:', e);
                     }
 
-                    return {
-                        currentMonth: currentMonth,
-                        currentYear: currentYear,
-                        availableDays: [...new Set(availableDays)].sort((a, b) => a - b),
-                        timeSlots: [...new Set(timeSlots)]
-                    };
+                    // Find time slots
+                    try {
+                        const selects = document.querySelectorAll('select');
+                        console.log('🔍 Found select elements:', selects.length);
+
+                        for (const select of selects) {
+                            const options = Array.from(select.options);
+
+                            for (const opt of options) {
+                                if (!opt.value || opt.value.trim() === '' || opt.disabled) {
+                                    continue;
+                                }
+
+                                const text = opt.textContent.trim();
+
+                                if (/\\d{1,2}:\\d{2}\\s*(AM|PM)?/i.test(text)) {
+                                    results.timeSlots.push(text);
+                                }
+                            }
+                        }
+
+                        results.timeSlots = [...new Set(results.timeSlots)];
+
+                        console.log('⏰ Time slots:', results.timeSlots);
+                    } catch (e) {
+                        console.error('Error finding times:', e);
+                    }
+
+                    return results;
                 }
             """)
+
+            self.logger.info(
+                f"📊 Extracted data: {len(appointment_data['availableDays'])} days, {len(appointment_data['timeSlots'])} time slots")
 
             # Combine dates and times
             if appointment_data['availableDays'] and appointment_data['timeSlots']:
@@ -1162,42 +1239,28 @@ class DMVScraper:
                         for time_str in appointment_data['timeSlots'][:5]:
                             slots.append(TimeSlot(date=slot_date, time=time_str))
 
-                    except ValueError:
+                    except ValueError as e:
+                        self.logger.warning(
+                            f"Invalid date: {day}/{appointment_data['currentMonth']}/{appointment_data['currentYear']}")
                         continue
 
             self.logger.info(f"✅ Found {len(slots)} slots for {location_name}")
 
-            await asyncio.sleep(3)
-
             # Go back to location list
+            await asyncio.sleep(2)
+
             try:
                 page_type = await self.get_current_page_type()
 
                 if page_type == 'appointment_page':
-                    self.logger.info("Going back from appointment page")
-                    # 🔥 УПРОЩЕНО: Сразу используем browser back, без попытки найти кнопку
+                    self.logger.info("🔙 Going back from appointment page")
                     await self.page.go_back()
-
                     await asyncio.sleep(2)
+
                     try:
                         await self.page.wait_for_load_state("networkidle", timeout=10000)
-
-                        # Verify we returned to location list
-                        final_page_type = await self.get_current_page_type()
-                        if final_page_type == 'location_list':
-                            self.logger.info("✅ Successfully returned to location list")
-                        else:
-                            self.logger.warning(f"⚠️ After going back, page type is: {final_page_type}")
-                            if final_page_type != 'location_list':
-                                await self.page.go_back()
-                                await asyncio.sleep(2)
-
-                    except Exception as e:
-                        self.logger.warning(f"Timeout waiting for location list: {e}")
-                        await self.page.go_back()
-                        await asyncio.sleep(2)
-                else:
-                    self.logger.warning(f"Expected appointment page but got: {page_type}")
+                    except:
+                        pass
 
             except Exception as e:
                 self.logger.error(f"Error going back: {e}")
@@ -1208,7 +1271,7 @@ class DMVScraper:
                     pass
 
         except Exception as e:
-            self.logger.error(f"❌ Error getting slots for {location_name}: {e}")
+            self.logger.error(f"❌ Error getting slots for {location_name}: {e}", exc_info=True)
 
         return slots
 
